@@ -21,8 +21,8 @@ runtime dependencies, which also keeps you clear of the inode limits that shared
 ## Step 1 — Publish a deploy branch (on your machine)
 
 ```bash
-git clone https://github.com/smallkhk/Duoplus.git
-cd Duoplus
+git clone https://github.com/smallkhk/Duoplus.git madova
+cd madova
 npm install
 ./scripts/release.sh
 ```
