@@ -324,6 +324,69 @@ output across and touches `tmp/restart.txt` for you.
 
 ---
 
+## Going live — leaving demo mode
+
+Demo mode is not one switch. Three of the four items below are configuration; the fourth is code
+you must write before taking money.
+
+### Config — do these now
+
+```bash
+cd ~/madova
+
+# Real devices: forward to the live cloud phone API instead of the built-in engine
+echo 'MADOVA_UPSTREAM_KEY=your-key-here' >> .env
+
+# Real assistant: any provider — without one it runs the basic intent router
+echo 'OPENAI_API_KEY=sk-...' >> .env
+
+# Secure cookies (do this only once HTTPS works, or nobody stays signed in)
+echo 'NODE_ENV=production' >> .env
+
+# Remove the seeded demo account and its 148 fake devices
+npm run remove-demo
+echo 'MADOVA_SEED_DEMO=false' >> .env
+
+touch tmp/restart.txt
+```
+
+Register your own account first — `remove-demo` warns if it would leave the database empty, because
+an empty database is re-seeded on the next start. With a real account present, or with
+`MADOVA_SEED_DEMO=false`, the demo never returns. The script writes a timestamped backup first.
+
+Confirm afterwards: `/api/meta` should report `"upstream": true` and a non-null assistant provider.
+
+### Code — before you take a single payment
+
+**Checkout provisions devices without charging anyone.** `payOrder` in `server/billing.ts` marks an
+order paid and hands over the devices; there is no processor. Anyone who signs up can help
+themselves. Wire a real charge into that function — it is commented to show exactly where — and
+only mutate on a successful capture.
+
+**Move off the JSON store.** It is fine for a pilot, but two simultaneous writes can lose one.
+`server/store.ts` is the only file that touches storage.
+
+### Console features that are still stubbed
+
+These say so when clicked, rather than pretending to work. They need building if you want them:
+
+| Screen | Not yet wired |
+| --- | --- |
+| API | Create, rotate and revoke keys |
+| Billing | Payment methods, upgrades, invoice PDFs, minute top-ups |
+| Proxies | Add, delete, bulk import |
+| Groups | Create, edit, delete |
+| Cloud drive | Upload, delete |
+| Cloud numbers | Rent, bind |
+| Automation | Create tasks |
+| Team | Invite, edit members |
+| Sub-accounts | Create, CSV export |
+| Settings | Save profile, change password, delete account |
+| Sign-in | Google and GitHub buttons |
+
+Everything else — accounts, sessions, device control, provisioning, orders, the assistant, support
+threads — is real and persists.
+
 ## What shared hosting will and will not do well
 
 Honest limits, so nothing surprises you later.

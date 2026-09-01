@@ -38,8 +38,18 @@ export function grantTrialPhone(user: User) {
   return phone
 }
 
+/**
+ * Seed the demo account, but only into a genuinely empty installation.
+ *
+ * Without the emptiness check the demo fleet reappears on every restart, so
+ * deleting it never sticks — the one thing an operator going live needs to do.
+ * `MADOVA_SEED_DEMO=false` disables it outright.
+ */
 export function seed() {
+  if ((process.env.MADOVA_SEED_DEMO ?? '').toLowerCase() === 'false') return
   if (findUserByEmail(DEMO_EMAIL)) return
+  /* Real accounts exist — never inject demo data into a live install. */
+  if (db().users.length > 0) return
 
   const demo = createUser({
     email: DEMO_EMAIL,

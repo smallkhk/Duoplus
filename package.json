@@ -13,7 +13,8 @@
     "start": "node server-dist/app.js",
     "build:web": "tsc -b && node scripts/build-web.mjs",
     "build:server": "node scripts/build-server.mjs",
-    "start:dev": "tsx server/index.ts"
+    "start:dev": "tsx server/index.ts",
+    "remove-demo": "node scripts/remove-demo.mjs"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",
