@@ -136,10 +136,16 @@ cPanel → **Setup Node.js App** → **Create Application**.
 | Field | Value |
 | --- | --- |
 | Node.js version | **22 or newer** — the OpenAI SDK requires it |
-| Application mode | Production |
+| Application mode | Production — see the note below |
 | Application root | `madova` |
 | Application URL | your domain or a subdomain, e.g. `madova.yourdomain.com` |
 | Application startup file | `server-dist/app.js` |
+
+**Application mode matters more than it looks.** Setting it to Development exports
+`NODE_ENV=development` into every shell the virtualenv activates, and Vite honours an ambient
+NODE_ENV — which bundles React's development build: roughly double the JavaScript, dev-only
+warnings and slower rendering, shipped to your customers. The build script now forces production
+mode so this cannot happen, but leave the app in Production mode anyway unless you are debugging.
 
 Save. Do **not** press "Run NPM Install" — there is nothing to install, and on a small plan it may
 fail on memory or inodes.

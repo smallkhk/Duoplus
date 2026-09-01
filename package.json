@@ -11,7 +11,7 @@
     "dev:api": "tsx watch server/index.ts",
     "dev:web": "vite",
     "start": "node server-dist/app.js",
-    "build:web": "tsc -b && vite build",
+    "build:web": "tsc -b && node scripts/build-web.mjs",
     "build:server": "node scripts/build-server.mjs",
     "start:dev": "tsx server/index.ts"
   },
