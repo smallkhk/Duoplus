@@ -83,6 +83,34 @@ export interface OrderLine {
   total_cents: number
 }
 
+export interface PaymentIntent {
+  chain: 'bsc' | 'tron'
+  network: string
+  token: string
+  address: string
+  amount: string
+  amount_units: string
+  contract: string
+  created_at: string
+  expires_at: string
+  status: 'awaiting' | 'confirming' | 'confirmed' | 'expired'
+  tx_hash?: string
+  confirmations?: number
+  explorer_url?: string
+  payment_uri: string
+  qr_svg: string
+  note?: string
+}
+
+export interface PaymentChain {
+  id: 'bsc' | 'tron'
+  label: string
+  network: string
+  token: string
+  confirmations?: number
+  settle_after_seconds?: number
+}
+
 export interface Order {
   id: string
   user_id: string
@@ -96,9 +124,11 @@ export interface Order {
   renew_phone_ids?: string[]
   renew_days?: number
   created_at: string
+  updated_at?: string
   paid_at?: string
   created_by: 'user' | 'assistant'
   note?: string
+  payment?: PaymentIntent
 }
 
 export interface Quote {
@@ -128,6 +158,11 @@ export interface ServerMeta {
   cloud: { upstream: boolean }
   demo_account: { email: string; hint: string }
   durations: number[]
+  payments: {
+    enabled: ('bsc' | 'tron')[]
+    window_minutes: number
+    chains: PaymentChain[]
+  }
 }
 
 export interface ThreadMessage {
@@ -168,6 +203,11 @@ export const api = {
   createOrder: (input: { quantity: number; duration_days: number; region: string; minutes?: number; group_name?: string }) =>
     apiPost<{ order: Order }>('/api/orders', input),
   payOrder: (id: string) => apiPost<{ order: Order; provisioned: string[] }>(`/api/orders/${id}/pay`),
+  createPayment: (id: string, chain: 'bsc' | 'tron') =>
+    apiPost<{ payment: PaymentIntent }>(`/api/orders/${id}/payment`, { chain }),
+  checkPayment: (id: string) =>
+    apiGet<{ payment: PaymentIntent; order: Order; provisioned: string[]; check: string }>(
+      `/api/orders/${id}/payment`),
   cancelOrder: (id: string) => apiPost<{ ok: true }>(`/api/orders/${id}/cancel`),
 
   knowledge: (q?: string) =>

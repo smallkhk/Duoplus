@@ -356,12 +356,38 @@ an empty database is re-seeded on the next start. With a real account present, o
 
 Confirm afterwards: `/api/meta` should report `"upstream": true` and a non-null assistant provider.
 
-### Code — before you take a single payment
+### Taking payment — USDT on BSC and Tron
 
-**Checkout provisions devices without charging anyone.** `payOrder` in `server/billing.ts` marks an
-order paid and hands over the devices; there is no processor. Anyone who signs up can help
-themselves. Wire a real charge into that function — it is commented to show exactly where — and
-only mutate on a successful capture.
+Checkout accepts USDT over BEP-20 and TRC-20. **The server never holds a private key**: you give it
+your own receiving address per chain and it only watches the chain, so a compromise of this box
+loses data, not funds.
+
+```bash
+cd ~/madova
+cat >> .env <<'EOF'
+MADOVA_BSC_ADDRESS=0xYourBscReceivingAddress
+MADOVA_TRON_ADDRESS=TYourTronReceivingAddress
+MADOVA_BSCSCAN_API_KEY=your-free-bscscan-key
+EOF
+touch tmp/restart.txt
+```
+
+Setting an address enables that network at checkout; leaving it blank hides it. A free BscScan key
+is strongly recommended — the unauthenticated endpoint is heavily rate limited. TronGrid works
+without a key.
+
+How it settles: each invoice is given a unique amount (a per-order offset in the fourth decimal,
+reserved while the invoice is open), so two customers owing the same price are never confused
+on-chain. The server matches recipient, exact amount and timestamp, refuses a transaction already
+credited to another order, and provisions the moment the transfer is deep enough — 12 confirmations
+on BSC, 60 seconds of age on Tron, both configurable. Provisioning happens server-side on the poll,
+so a customer who closes the tab still gets what they paid for.
+
+Only USDT is auto-confirmed. It is a stablecoin, so a dollar invoice is a token invoice with no
+price oracle involved; quoting native BNB or TRX would need a live rate and a slippage window.
+
+Two things to verify yourself before real money moves: the token contract addresses (the defaults
+are the canonical USDT contracts, but check them), and a small end-to-end payment on each chain.
 
 **Move off the JSON store.** It is fine for a pilot, but two simultaneous writes can lose one.
 `server/store.ts` is the only file that touches storage.

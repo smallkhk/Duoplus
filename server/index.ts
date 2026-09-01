@@ -21,6 +21,9 @@ import {
   accountSummary, cancelOrder, createOrder, DURATIONS, orderById, ordersOf, payOrder, quote,
 } from './billing.js'
 import { ARTICLES, CATEGORIES, articleById, searchArticles } from './knowledge.js'
+import {
+  applyCheck, checkIntent, createIntent, enabledChains, paymentConfig, type ChainId,
+} from './crypto.js'
 import { assistantConfigured, MODEL, PROVIDER_ID, PROVIDER_LABEL, runAssistant } from './assistant.js'
 import { DEMO_EMAIL, grantTrialPhone, seed } from './seed.js'
 import {
@@ -51,6 +54,7 @@ app.get('/api/meta', (_req, res) => {
     cloud: { upstream: upstreamConfigured() },
     demo_account: { email: DEMO_EMAIL, hint: 'Seeded account with a populated fleet' },
     durations: DURATIONS,
+    payments: paymentConfig(),
   }))
 })
 
@@ -147,10 +151,64 @@ app.get('/api/orders/:id', requireAuth, (req, res) => {
   res.json(envelope({ order }))
 })
 
+/** Settle from account credit. On-chain orders settle through /payment instead. */
 app.post('/api/orders/:id/pay', requireAuth, (req, res) => {
   const result = payOrder(req.user!, req.params.id)
   if ('error' in result) return errorOut(res, 400, result.error)
   res.json(envelope({ order: result.order, provisioned: result.provisioned }))
+})
+
+/* ----------------------------- crypto checkout ---------------------------- */
+
+/** Create the on-chain invoice: address, exact amount, QR and deadline. */
+app.post('/api/orders/:id/payment', requireAuth, async (req, res) => {
+  const chain = String(req.body?.chain ?? '') as ChainId
+  if (!enabledChains().includes(chain)) {
+    return errorOut(res, 400, 'That payment network is not available on this server')
+  }
+  const order = orderById(req.user!.id, req.params.id)
+  if (!order) return errorOut(res, 404, 'Order not found')
+  if (order.status !== 'pending') return errorOut(res, 400, `This order is already ${order.status}`)
+
+  try {
+    const intent = await createIntent(order, chain)
+    mutate((d) => {
+      const stored = d.orders.find((o) => o.id === order.id)!
+      stored.payment = intent
+      stored.updated_at = nowIso()
+    })
+    res.json(envelope({ payment: intent }))
+  } catch (err) {
+    errorOut(res, 400, err instanceof Error ? err.message : 'Could not create the invoice')
+  }
+})
+
+/**
+ * Poll the chain for this invoice.
+ *
+ * Provisioning happens here, the moment a payment settles, so a customer who
+ * closes the tab still gets what they paid for on their next visit.
+ */
+app.get('/api/orders/:id/payment', requireAuth, async (req, res) => {
+  const order = orderById(req.user!.id, req.params.id)
+  if (!order) return errorOut(res, 404, 'Order not found')
+  if (!order.payment) return errorOut(res, 404, 'This order has no payment intent')
+
+  if (order.status === 'paid') {
+    return res.json(envelope({ payment: order.payment, order, provisioned: [] }))
+  }
+
+  const result = await checkIntent(order)
+  applyCheck(order.id, result)
+
+  let provisioned: string[] = []
+  if (result.state === 'confirmed') {
+    const settled = payOrder(req.user!, order.id)
+    if (!('error' in settled)) provisioned = settled.provisioned
+  }
+
+  const fresh = orderById(req.user!.id, order.id)!
+  res.json(envelope({ payment: fresh.payment, order: fresh, provisioned, check: result.state }))
 })
 
 app.post('/api/orders/:id/cancel', requireAuth, (req, res) => {

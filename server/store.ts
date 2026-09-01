@@ -9,6 +9,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { CloudPhone } from '../src/lib/duoplus/types'
+import type { PaymentIntent } from './crypto.js'
 
 /**
  * Paths resolve from the working directory rather than the module's own
@@ -63,10 +64,13 @@ export interface Order {
   renew_phone_ids?: string[]
   renew_days?: number
   created_at: string
+  updated_at?: string
   paid_at?: string
   /** Set when an order was raised by the assistant and awaits the customer's approval. */
   created_by: 'user' | 'assistant'
   note?: string
+  /** On-chain invoice, once the customer picks a payment method. */
+  payment?: PaymentIntent
 }
 
 export interface SupportMessage {

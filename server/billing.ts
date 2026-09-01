@@ -5,9 +5,9 @@
  * month with a volume discount, runtime is bought either as prepaid startup
  * minutes or as a flat monthly subscription.
  *
- * There is no payment processor wired in. `payOrder` settles against the
- * account's demo credit and provisions immediately — the place to drop a real
- * Stripe/PayPal charge is marked below.
+ * Orders settle one of two ways: an on-chain USDT payment confirmed by
+ * server/crypto.ts, or account credit an operator granted. `payOrder` refuses
+ * anything else — provisioning without payment is how you give your fleet away.
  */
 import { db, findUser, mutate, nowIso, prefixedId, type Order, type OrderLine, type User } from './store.js'
 import { provision, REGION_INDEX, REGIONS } from './fleet.js'
@@ -195,15 +195,25 @@ export interface PaidOrder {
 /**
  * Settle an order and provision what it bought.
  *
- * Payment capture belongs here: charge the customer, and only mutate on a
- * successful charge. Until a processor is configured this records the order as
- * paid without taking money.
+ * Refuses unless the order is actually funded — either an on-chain payment this
+ * server has seen confirmed, or account credit covering the total. `allowFree`
+ * exists only for operator tooling and is never reachable from a request.
  */
-export function payOrder(user: User, orderId: string): PaidOrder | { error: string } {
+export function payOrder(
+  user: User,
+  orderId: string,
+  opts: { allowFree?: boolean } = {},
+): PaidOrder | { error: string } {
   const order = db().orders.find((o) => o.id === orderId && o.user_id === user.id)
   if (!order) return { error: 'Order not found' }
   if (order.status === 'paid') return { error: 'This order has already been paid' }
   if (order.status === 'cancelled') return { error: 'This order was cancelled' }
+
+  const settledOnChain = order.payment?.status === 'confirmed'
+  const coveredByCredit = user.credit_cents >= order.total_cents
+  if (!settledOnChain && !coveredByCredit && !opts.allowFree) {
+    return { error: 'This order is not paid yet. Complete the payment first.' }
+  }
 
   const provisioned: string[] = []
 

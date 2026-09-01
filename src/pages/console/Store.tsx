@@ -6,6 +6,7 @@ import { PhoneFrame } from '@/components/PhoneFrame'
 import {
   Badge, Button, Card, Field, Select, Skeleton, cx, useToast,
 } from '@/components/ui'
+import { CryptoCheckout } from '@/components/CryptoCheckout'
 import { api, ApiError, type Order, type Quote } from '@/lib/api'
 import { accountChanged, useAuth } from '@/lib/auth'
 import { REGIONS } from '@/data/demo'
@@ -18,7 +19,9 @@ const MINUTE_PACKS = [0, 5_000, 20_000, 100_000, 500_000]
 
 export function Store() {
   const toast = useToast()
-  const { refresh } = useAuth()
+  const { refresh, meta } = useAuth()
+  const chains = meta?.payments.chains ?? []
+  const cryptoAvailable = chains.length > 0
 
   const [quantity, setQuantity] = useState(5)
   const [region, setRegion] = useState(REGIONS[0].region)
@@ -29,6 +32,8 @@ export function Store() {
   const [quote, setQuote] = useState<Quote | null>(null)
   const [orders, setOrders] = useState<Order[] | null>(null)
   const [busy, setBusy] = useState(false)
+  /* The order currently at the payment step. */
+  const [paying, setPaying] = useState<Order | null>(null)
 
   const loadOrders = useCallback(() => {
     api.orders().then((d) => setOrders(d.orders)).catch(() => setOrders([]))
@@ -54,11 +59,17 @@ export function Store() {
       const { order } = await api.createOrder({
         quantity, duration_days: durationDays, region, minutes: minutes || undefined, group_name: 'Unassigned',
       })
-      const paid = await api.payOrder(order.id)
-      toast(`Provisioned ${paid.provisioned.length} device${paid.provisioned.length === 1 ? '' : 's'}.`, 'ok')
       loadOrders()
-      accountChanged()
-      await refresh()
+      if (cryptoAvailable) {
+        setPaying(order)
+      } else {
+        /* No payment network configured — fall back to account credit. */
+        const paid = await api.payOrder(order.id)
+        toast(`Provisioned ${paid.provisioned.length} device${paid.provisioned.length === 1 ? '' : 's'}.`, 'ok')
+        loadOrders()
+        accountChanged()
+        await refresh()
+      }
     } catch (err) {
       toast(err instanceof ApiError ? err.message : 'Checkout failed.', 'danger')
     } finally {
@@ -67,6 +78,7 @@ export function Store() {
   }
 
   const approve = async (order: Order) => {
+    if (cryptoAvailable) { setPaying(order); return }
     setBusy(true)
     try {
       const paid = await api.payOrder(order.id)
@@ -109,7 +121,25 @@ export function Store() {
         }
       />
 
-      {pending.length > 0 && (
+      {paying && (
+        <div className="mb-4">
+          <CryptoCheckout
+            order={paying}
+            chains={chains}
+            onSettled={() => {
+              setPaying(null)
+              loadOrders()
+            }}
+            onCancel={() => {
+              void api.cancelOrder(paying.id).catch(() => {})
+              setPaying(null)
+              loadOrders()
+            }}
+          />
+        </div>
+      )}
+
+      {!paying && pending.length > 0 && (
         <Card className="mb-4 border-brand-500/40 bg-brand-500/[0.04] p-5">
           <div className="flex items-center gap-2.5">
             <Icon name="alert" className="size-4 shrink-0 text-brand-300" />
@@ -128,7 +158,9 @@ export function Store() {
                 </span>
                 <span className="font-mono text-[1rem] font-semibold text-ink-50">{money(o.total_cents)}</span>
                 <span className="flex gap-2">
-                  <Button size="sm" disabled={busy} onClick={() => void approve(o)}>Approve &amp; pay</Button>
+                  <Button size="sm" disabled={busy} onClick={() => void approve(o)}>
+                    {cryptoAvailable ? 'Pay' : 'Approve & pay'}
+                  </Button>
                   <Button size="sm" variant="ghost" onClick={() => void cancel(o)}>Cancel</Button>
                 </span>
               </li>
@@ -247,9 +279,11 @@ export function Store() {
               {busy ? 'Provisioning…' : `Buy ${quantity} device${quantity === 1 ? '' : 's'}`}
             </Button>
             <p className="mt-3 text-[0.72rem] leading-relaxed text-ink-500">
-              No payment processor is connected in this build — the order is recorded and the devices
-              are provisioned immediately. Wire a charge into <code className="font-mono">payOrder</code> before
-              taking real money.
+              {cryptoAvailable
+                ? <>Paid in USDT on {chains.map((c) => c.label).join(' or ')}. Devices are provisioned
+                   the moment the payment settles on-chain.</>
+                : <>No payment network is configured, so this settles against account credit. Set a
+                   receiving address on the server before taking real money.</>}
             </p>
           </Card>
 
