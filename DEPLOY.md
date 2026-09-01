@@ -196,8 +196,10 @@ repository is therefore downloadable over HTTPS — including `data/madova.json`
 account with its password hash and salt. Dotfiles like `.env` are blocked by cPanel's default rules,
 but nothing else is.
 
-It also means `/` returns Vite's source `index.html` — a page referencing `/src/main.tsx` that no
-browser can run — instead of your app.
+The entry HTML now lives in `web/index.html`, so there is no `index.html` at the project root for
+Apache to serve — `/` reaches the app. Earlier versions kept it at the root, which made the bare `/`
+return an unbuilt template that renders as a blank page while every other route worked. If you see
+that, you are on an older build: `git pull && npm run build`.
 
 Two fixes. First, move the database out of the web root:
 
@@ -217,9 +219,7 @@ cd ~/madova
 cat >> .htaccess <<'EOF'
 
 # Passenger serves the whole app. Apache must not hand out project files.
-DirectoryIndex disabled
-RedirectMatch 404 ^/(data|server|server-dist|src|scripts|node_modules|dist)/
-RedirectMatch 404 ^/index\.html$
+RedirectMatch 404 ^/(data|server|server-dist|src|scripts|node_modules|dist|web)/
 <FilesMatch "\.(ts|tsx|json|md|yml|yaml|map|lock|example)$">
   Require all denied
 </FilesMatch>
@@ -242,6 +242,10 @@ Every one should be 403 or 404. `/`, `/console` and `/api/meta` should all be 20
 
 **If the site was already reachable before you did this, treat it as a disclosure.** Rotate
 `MADOVA_SESSION_SECRET` (which signs everyone out), and reset the password of any real account.
+
+Note that some hosts do not permit `Indexes` overrides in `.htaccess`, so a `DirectoryIndex`
+directive there may be silently ignored. That is why the entry HTML was moved out of the project
+root rather than being suppressed with Apache configuration.
 
 ## Step 5 — Check it
 

@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/*
+ * Vite's root is web/, so Tailwind's automatic source detection only sees that
+ * directory. Point it at the application source explicitly, or every utility
+ * class used under src/ is dropped from the build.
+ */
+@source "../src/**/*.{ts,tsx}";
+
 /* ------------------------------------------------------------------ *
  * MADOVA design tokens
  * ------------------------------------------------------------------ */
