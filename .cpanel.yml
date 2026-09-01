@@ -1,0 +1,20 @@
+---
+# cPanel deployment task, run when you press "Deploy HEAD Commit" in
+# Git Version Control.
+#
+# Only needed when the repository lives somewhere other than the Node
+# application directory — it copies the build output into place. If you cloned
+# the repository directly into the application directory, you do not need this
+# file at all; "Update from Remote" is the whole deployment.
+#
+# Set DEPLOY_PATH to your Node application's root before using it.
+deployment:
+  tasks:
+    - export DEPLOY_PATH=/home/$(whoami)/madova
+    - /bin/mkdir -p $DEPLOY_PATH
+    - /bin/cp -R dist $DEPLOY_PATH/
+    - /bin/cp -R server-dist $DEPLOY_PATH/
+    - /bin/cp package.json $DEPLOY_PATH/
+    # Passenger restarts the app when this file's timestamp changes.
+    - /bin/mkdir -p $DEPLOY_PATH/tmp
+    - /bin/touch $DEPLOY_PATH/tmp/restart.txt

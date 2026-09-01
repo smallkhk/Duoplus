@@ -6,7 +6,6 @@
  * talks only to this server.
  */
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import express from 'express'
 import cookieParser from 'cookie-parser'
 
@@ -25,7 +24,6 @@ import {
   db, findUserByEmail, mutate, nowIso, prefixedId, publicUser, type SupportThread,
 } from './store.js'
 
-const here = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
 const PORT = Number(process.env.PORT ?? 8787)
 
@@ -277,7 +275,7 @@ app.post('/api/assistant/message', async (req, res) => {
 
 /* -------------------------------- static -------------------------------- */
 
-const distDir = path.join(here, '..', 'dist')
+const distDir = process.env.MADOVA_STATIC_DIR ?? path.join(process.cwd(), 'dist')
 app.use(express.static(distDir, { index: false }))
 
 /* The SPA owns client-side routing; anything not an API path falls through. */
@@ -287,8 +285,10 @@ app.get(/^(?!\/api\/).*/, (_req, res, next) => {
 
 seed()
 
+/* Passenger (cPanel) supplies the listening socket and ignores the port. */
 app.listen(PORT, () => {
   console.log(`MADOVA API on http://localhost:${PORT}`)
+  console.log(`  static files : ${distDir}`)
   console.log(`  cloud phones : ${upstreamConfigured() ? 'live upstream' : 'local engine'}`)
   console.log(`  assistant    : ${assistantConfigured()
     ? `${PROVIDER_LABEL} · ${MODEL}`

@@ -8,9 +8,11 @@ AI assistant that can actually drive it.
 ```bash
 npm install
 npm run dev      # API on :8787, Vite on :5173 (the web app proxies /api to the API)
-npm run build    # typecheck + production bundle into dist/
+npm run build    # front end into dist/, API bundled into server-dist/
 npm start        # single process: API + the built SPA on :8787
 ```
+
+Deploying to cPanel or shared hosting: **[DEPLOY.md](DEPLOY.md)**.
 
 Sign in with the seeded demo account — **demo@madova.io** / **madova-demo-2026** — for a fleet of
 148 devices, or register and get the free trial: one device and 30 startup minutes.

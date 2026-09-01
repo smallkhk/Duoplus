@@ -8,11 +8,14 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import type { CloudPhone } from '../src/lib/duoplus/types'
 
-const here = path.dirname(fileURLToPath(import.meta.url))
-const DATA_DIR = process.env.MADOVA_DATA_DIR ?? path.join(here, '..', 'data')
+/**
+ * Paths resolve from the working directory rather than the module's own
+ * location, so the server behaves the same whether it runs from source in
+ * development or as a single bundled file in production.
+ */
+const DATA_DIR = process.env.MADOVA_DATA_DIR ?? path.join(process.cwd(), 'data')
 const DB_PATH = path.join(DATA_DIR, 'madova.json')
 
 export type UserRole = 'owner' | 'admin' | 'operator' | 'viewer'
@@ -100,20 +103,47 @@ export interface Database {
 const EMPTY: Database = { version: 1, users: [], phones: [], orders: [], threads: [] }
 
 let cache: Database | null = null
+/** Modification time of the file the cache was built from. */
+let cacheMtimeMs = 0
 
 function ensureDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true })
 }
 
-export function db(): Database {
-  if (cache) return cache
-  ensureDir()
+function diskMtimeMs(): number {
+  try {
+    return fs.statSync(DB_PATH).mtimeMs
+  } catch {
+    return 0
+  }
+}
+
+function load(): Database {
   try {
     const raw = fs.readFileSync(DB_PATH, 'utf8')
-    cache = { ...EMPTY, ...(JSON.parse(raw) as Database) }
+    cacheMtimeMs = diskMtimeMs()
+    return { ...EMPTY, ...(JSON.parse(raw) as Database) }
   } catch {
-    cache = structuredClone(EMPTY)
+    cacheMtimeMs = 0
+    return structuredClone(EMPTY)
   }
+}
+
+/**
+ * Read the database, refreshing from disk when another process has written to
+ * it since we last looked.
+ *
+ * Passenger and most process managers run several worker processes against one
+ * application directory. Without this check each worker would keep its own
+ * stale copy and silently overwrite the others' writes on the next save.
+ */
+export function db(): Database {
+  ensureDir()
+  if (!cache) {
+    cache = load()
+    return cache
+  }
+  if (diskMtimeMs() !== cacheMtimeMs) cache = load()
   return cache
 }
 
@@ -124,6 +154,7 @@ export function persist() {
   const tmp = `${DB_PATH}.${process.pid}.tmp`
   fs.writeFileSync(tmp, JSON.stringify(cache, null, 2))
   fs.renameSync(tmp, DB_PATH)
+  cacheMtimeMs = diskMtimeMs()
 }
 
 /** Run a mutation and persist it. */
