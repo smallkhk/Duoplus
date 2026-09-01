@@ -19,7 +19,7 @@ import {
   accountSummary, cancelOrder, createOrder, DURATIONS, orderById, ordersOf, payOrder, quote,
 } from './billing.js'
 import { ARTICLES, CATEGORIES, articleById, searchArticles } from './knowledge.js'
-import { assistantConfigured, MODEL, runAssistant } from './assistant.js'
+import { assistantConfigured, MODEL, PROVIDER_ID, PROVIDER_LABEL, runAssistant } from './assistant.js'
 import { DEMO_EMAIL, grantTrialPhone, seed } from './seed.js'
 import {
   db, findUserByEmail, mutate, nowIso, prefixedId, publicUser, type SupportThread,
@@ -41,7 +41,12 @@ const errorOut = (res: express.Response, code: number, message: string) =>
 
 app.get('/api/meta', (_req, res) => {
   res.json(envelope({
-    assistant: { configured: assistantConfigured(), model: assistantConfigured() ? MODEL : null },
+    assistant: {
+      configured: assistantConfigured(),
+      model: MODEL,
+      provider: PROVIDER_ID,
+      provider_label: PROVIDER_LABEL,
+    },
     cloud: { upstream: upstreamConfigured() },
     demo_account: { email: DEMO_EMAIL, hint: 'Seeded account with a populated fleet' },
     durations: DURATIONS,
@@ -285,5 +290,7 @@ seed()
 app.listen(PORT, () => {
   console.log(`MADOVA API on http://localhost:${PORT}`)
   console.log(`  cloud phones : ${upstreamConfigured() ? 'live upstream' : 'local engine'}`)
-  console.log(`  assistant    : ${assistantConfigured() ? `${MODEL}` : 'fallback router (no model credentials)'}`)
+  console.log(`  assistant    : ${assistantConfigured()
+    ? `${PROVIDER_LABEL} · ${MODEL}`
+    : 'fallback router (no model provider configured)'}`)
 })

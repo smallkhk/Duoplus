@@ -1,7 +1,7 @@
 /**
  * The tools the assistant can actually run.
  *
- * Each tool is defined once here: the JSON schema Claude sees, and the handler
+ * Each tool is defined once here: the JSON schema the model sees, and the handler
  * that executes it. Handlers go through the same fleet and billing modules the
  * console uses, so there is no second code path that could drift.
  *
@@ -10,7 +10,7 @@
  *   - Nothing spends money. Purchases and renewals are prepared as pending
  *     orders that only the customer can approve.
  */
-import type Anthropic from '@anthropic-ai/sdk'
+import type OpenAI from 'openai'
 import { cloudCall, REGIONS, REGION_INDEX } from './fleet.js'
 import { accountSummary, createOrder, createRenewalOrder, DURATIONS, ordersOf } from './billing.js'
 import { searchArticles } from './knowledge.js'
@@ -27,7 +27,7 @@ export interface ToolContext {
 }
 
 export interface ToolOutcome {
-  /** What Claude sees. */
+  /** What the model sees. */
   result: unknown
   /** One line for the transcript UI. */
   summary: string
@@ -36,12 +36,12 @@ export interface ToolOutcome {
 
 const REGION_NAMES = REGIONS.map((r) => r.region)
 
-export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
+const TOOL_SPECS: { name: string; description: string; parameters: Record<string, unknown> }[] = [
   {
     name: 'search_knowledge',
     description:
       'Search the MADOVA knowledge base for how the product works — pricing, device states, fingerprints, proxies, the API, reselling, troubleshooting. Use this before answering any factual question about the product; do not answer product questions from memory.',
-    input_schema: {
+    parameters: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'What to look up, in the customer\'s own words.' },
@@ -54,13 +54,13 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
     name: 'get_account_summary',
     description:
       "Read the signed-in customer's account: plan, prepaid minute balance, how many devices they have and in what state, which regions, order count and total spend. Use this whenever the answer depends on their actual account.",
-    input_schema: { type: 'object', properties: {}, additionalProperties: false },
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
     name: 'list_phones',
     description:
       "List the customer's cloud phones, optionally filtered. Use it to find device IDs before acting on them, and to answer questions about what they have.",
-    input_schema: {
+    parameters: {
       type: 'object',
       properties: {
         name_contains: { type: 'string', description: 'Match device names containing this text.' },
@@ -79,7 +79,7 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
     name: 'control_phones',
     description:
       'Power devices on, power them off, or restart them. Select devices either by explicit phone_ids, or by name_contains / group_name to act on a set. This performs the action immediately — it is free, so it does not need approval. Never use it on devices you have not confirmed belong to the customer.',
-    input_schema: {
+    parameters: {
       type: 'object',
       properties: {
         action: { type: 'string', enum: ['power_on', 'power_off', 'restart'] },
@@ -95,7 +95,7 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
     name: 'update_phone',
     description:
       "Change a single device's settings: its name, remark, GPS coordinates, timezone or language. Omitted fields are left untouched. Free and immediate.",
-    input_schema: {
+    parameters: {
       type: 'object',
       properties: {
         phone_id: { type: 'string', description: 'The device ID to change.' },
@@ -114,7 +114,7 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
     name: 'run_adb_command',
     description:
       'Run one ADB shell command on a device and return its output. The "adb shell" prefix is not needed and the command must finish within ten seconds. Use it for diagnostics such as getprop, pm list packages or wm size.',
-    input_schema: {
+    parameters: {
       type: 'object',
       properties: {
         phone_id: { type: 'string' },
@@ -128,7 +128,7 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
     name: 'prepare_device_purchase',
     description:
       'Prepare an order for new cloud phones and show the customer the total. This does NOT buy anything — it returns a pending order the customer must approve in the chat. Always state the total and the term back to them after calling it.',
-    input_schema: {
+    parameters: {
       type: 'object',
       properties: {
         quantity: { type: 'integer', description: 'Number of devices, 1-500.' },
@@ -145,7 +145,7 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
     name: 'prepare_renewal',
     description:
       'Prepare an order that extends the subscription on existing devices. Like a purchase, this only prepares it — the customer approves it in the chat. Select devices by phone_ids or name_contains.',
-    input_schema: {
+    parameters: {
       type: 'object',
       properties: {
         phone_ids: { type: 'array', items: { type: 'string' } },
@@ -159,13 +159,13 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: 'list_orders',
     description: "List the customer's recent orders with their status and totals.",
-    input_schema: { type: 'object', properties: {}, additionalProperties: false },
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
     name: 'escalate_to_human',
     description:
       'Hand the conversation to the human support team. Use it when the customer asks for a person, when something needs an account change you cannot make, or when you have failed to resolve the issue.',
-    input_schema: {
+    parameters: {
       type: 'object',
       properties: {
         reason: { type: 'string', description: 'A one-line summary for the human picking it up.' },
@@ -175,6 +175,13 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
     },
   },
 ]
+
+/** The same tools in the OpenAI function-calling shape every provider accepts. */
+export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = TOOL_SPECS.map(
+  (t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }),
+)
+
+export const TOOL_NAMES = TOOL_SPECS.map((t) => t.name)
 
 const STATUS_FILTER: Record<string, string[] | undefined> = {
   powered_on: ['1'],

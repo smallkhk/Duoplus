@@ -119,7 +119,12 @@ export interface KnowledgeArticle {
 }
 
 export interface ServerMeta {
-  assistant: { configured: boolean; model: string | null }
+  assistant: {
+    configured: boolean
+    model: string | null
+    provider: string | null
+    provider_label: string | null
+  }
   cloud: { upstream: boolean }
   demo_account: { email: string; hint: string }
   durations: number[]

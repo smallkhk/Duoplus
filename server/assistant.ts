@@ -1,37 +1,47 @@
 /**
  * The MADOVA assistant.
  *
- * Claude runs the conversation and calls the tools in assistant-tools.ts, which
- * act on the customer's real account. The loop is written by hand rather than
- * using the SDK tool runner so each tool call can be streamed to the browser as
- * it happens — customers see "Restarted 3 devices" while it is working, not
- * only at the end.
+ * The model runs the conversation and calls the tools in assistant-tools.ts,
+ * which act on the customer's real account. The loop is written by hand rather
+ * than using a framework so each tool call can be streamed to the browser as it
+ * happens — customers see "Restarted 3 devices" while it is working, not only
+ * at the end.
  *
- * With no model credentials configured the assistant falls back to a
- * deterministic intent router (see `runFallback`). It runs the same tools, so
- * device control and purchases still work; it just cannot converse. The UI
- * labels that mode so nobody mistakes it for the model.
+ * Provider-agnostic: every supported provider speaks the OpenAI Chat
+ * Completions wire format, so one client covers OpenAI, Google Gemini, Groq,
+ * Mistral, DeepSeek, Together, xAI, OpenRouter, a local Ollama, or any other
+ * OpenAI-compatible endpoint. See server/providers.ts.
+ *
+ * With no provider configured the assistant falls back to a deterministic
+ * intent router (see `runFallback`). It runs the same tools, so device control
+ * and purchases still work; it just cannot converse. The UI labels that mode.
  */
-import Anthropic from '@anthropic-ai/sdk'
+import OpenAI from 'openai'
 import { REGIONS } from './fleet.js'
 import { searchArticles } from './knowledge.js'
 import { runTool, TOOL_DEFINITIONS, type ToolContext } from './assistant-tools.js'
 import { accountSummary, DURATIONS } from './billing.js'
+import { resolveProvider } from './providers.js'
 import type { Order, SupportThread, User } from './store.js'
 
-export const MODEL = process.env.MADOVA_ASSISTANT_MODEL ?? 'claude-opus-5'
+const provider = resolveProvider()
 
-/**
- * The SDK resolves credentials from ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or
- * a stored CLI profile, so we only construct the client when one of those is
- * present and let it fail loudly if the credential is bad.
- */
-const hasCredential = Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN)
-export const assistantConfigured = () => hasCredential
+export const MODEL = provider?.model ?? null
+export const PROVIDER_ID = provider?.spec.id ?? null
+export const PROVIDER_LABEL = provider?.spec.label ?? null
+export const assistantConfigured = () => provider !== null
 
-const client = hasCredential ? new Anthropic() : null
+const client = provider
+  ? new OpenAI({
+      apiKey: provider.apiKey,
+      baseURL: provider.baseURL,
+      defaultHeaders: provider.spec.headers,
+      maxRetries: 2,
+    })
+  : null
 
 const MAX_TOOL_ROUNDS = 6
+const MAX_TOKENS = 2000
 
 const STABLE_SYSTEM = `You are the MADOVA assistant — the support and operations assistant on madova.io.
 
@@ -81,17 +91,69 @@ export interface AssistantReply {
   mode: 'model' | 'fallback'
 }
 
-/** Convert stored thread history into API messages. */
-function toMessages(thread: SupportThread): Anthropic.MessageParam[] {
-  const out: Anthropic.MessageParam[] = []
+/** Convert stored thread history into chat messages. */
+function toMessages(thread: SupportThread): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
+  const out: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = []
   for (const m of thread.messages) {
     if (m.role === 'user') out.push({ role: 'user', content: m.text })
     else if (m.role === 'assistant' || m.role === 'agent') out.push({ role: 'assistant', content: m.text })
     /* System notes are context for humans, not for the model. */
   }
-  /* The API requires the first message to be from the user. */
-  while (out.length > 0 && out[0].role !== 'user') out.shift()
   return out
+}
+
+/** A tool call assembled from streamed deltas. */
+interface StreamedToolCall {
+  id: string
+  name: string
+  args: string
+}
+
+/**
+ * Read one streamed completion, forwarding text as it arrives and assembling
+ * any tool calls. Providers send tool calls as fragments keyed by index, so the
+ * name and the argument JSON both have to be concatenated across chunks.
+ */
+async function readStream(
+  stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>,
+  onText: (delta: string) => void,
+): Promise<{ text: string; toolCalls: StreamedToolCall[]; finishReason: string | null }> {
+  let text = ''
+  let finishReason: string | null = null
+  const calls: StreamedToolCall[] = []
+
+  for await (const chunk of stream) {
+    const choice = chunk.choices?.[0]
+    if (!choice) continue
+    if (choice.finish_reason) finishReason = choice.finish_reason
+
+    const delta = choice.delta
+    if (delta?.content) {
+      text += delta.content
+      onText(delta.content)
+    }
+
+    for (const part of delta?.tool_calls ?? []) {
+      const i = part.index ?? 0
+      calls[i] ??= { id: '', name: '', args: '' }
+      if (part.id) calls[i].id = part.id
+      if (part.function?.name) calls[i].name += part.function.name
+      if (part.function?.arguments) calls[i].args += part.function.arguments
+    }
+  }
+
+  return { text, toolCalls: calls.filter(Boolean), finishReason }
+}
+
+/** Tool arguments arrive as a JSON string; some models emit malformed JSON. */
+function parseArgs(raw: string): Record<string, unknown> {
+  if (!raw.trim()) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
 }
 
 export async function runAssistant(opts: {
@@ -99,53 +161,49 @@ export async function runAssistant(opts: {
   thread: SupportThread
   events?: AssistantEvents
 }): Promise<AssistantReply> {
-  if (!client) return runFallback(opts)
+  if (!client || !provider) return runFallback(opts)
 
   const ctx: ToolContext = { user: opts.user, threadId: opts.thread.id }
   const actions: AssistantReply['actions'] = []
-  const messages = toMessages(opts.thread)
+  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+    { role: 'system', content: `${STABLE_SYSTEM}\n\n${contextBlock(opts.user)}` },
+    ...toMessages(opts.thread),
+  ]
   let text = ''
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const stream = client.messages.stream({
-        model: MODEL,
-        max_tokens: 8000,
-        thinking: { type: 'adaptive' },
-        output_config: { effort: 'medium' },
-        system: [
-          { type: 'text', text: STABLE_SYSTEM, cache_control: { type: 'ephemeral' } },
-          { type: 'text', text: contextBlock(opts.user) },
-        ],
-        tools: TOOL_DEFINITIONS,
+      const stream = await client.chat.completions.create({
+        model: provider.model,
+        max_tokens: MAX_TOKENS,
+        temperature: 0.3,
         messages,
+        tools: TOOL_DEFINITIONS,
+        tool_choice: 'auto',
+        stream: true,
       })
 
-      stream.on('text', (delta) => {
+      const { text: chunkText, toolCalls } = await readStream(stream, (delta) => {
         text += delta
         opts.events?.onText?.(delta)
       })
 
-      const response = await stream.finalMessage()
+      if (toolCalls.length === 0) break
 
-      if (response.stop_reason === 'refusal') {
-        const explanation = response.stop_details?.explanation ?? 'The request was declined.'
-        return { text: explanation, actions, escalated: false, mode: 'model' }
-      }
+      messages.push({
+        role: 'assistant',
+        content: chunkText || null,
+        tool_calls: toolCalls.map((c) => ({
+          id: c.id,
+          type: 'function' as const,
+          function: { name: c.name, arguments: c.args },
+        })),
+      })
 
-      messages.push({ role: 'assistant', content: response.content })
-
-      const toolUses = response.content.filter(
-        (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
-      )
-      if (toolUses.length === 0) break
-
-      /* All tool_result blocks must go back in a single user message. */
-      const results: Anthropic.ToolResultBlockParam[] = []
-      for (const call of toolUses) {
+      for (const call of toolCalls) {
         let outcome
         try {
-          outcome = await runTool(call.name, call.input, ctx)
+          outcome = await runTool(call.name, parseArgs(call.args), ctx)
         } catch (err) {
           outcome = {
             ok: false,
@@ -155,29 +213,38 @@ export async function runAssistant(opts: {
         }
         actions.push({ name: call.name, summary: outcome.summary, ok: outcome.ok })
         opts.events?.onTool?.({ name: call.name, summary: outcome.summary, ok: outcome.ok })
-        results.push({
-          type: 'tool_result',
-          tool_use_id: call.id,
+        messages.push({
+          role: 'tool',
+          tool_call_id: call.id,
           content: JSON.stringify(outcome.result),
-          is_error: !outcome.ok,
         })
       }
-      messages.push({ role: 'user', content: results })
 
       if (ctx.pendingOrder) opts.events?.onOrder?.(ctx.pendingOrder)
     }
   } catch (err) {
-    if (err instanceof Anthropic.AuthenticationError) {
+    const label = provider.spec.label
+    if (err instanceof OpenAI.AuthenticationError) {
+      console.error(`[assistant] ${label} rejected the credential:`, err.message)
       return {
-        text: 'My model credentials are not valid, so I am running in basic mode. I can still control devices and look things up — try "restart <device name>" or "how does billing work".',
+        text: `My ${label} credentials were rejected, so I am running in basic mode. I can still control devices and look things up — try "restart <device name>" or "how does billing work".`,
         actions, escalated: false, mode: 'fallback',
       }
     }
-    if (err instanceof Anthropic.RateLimitError) {
-      return { text: 'I am rate limited right now — give me a few seconds and ask again.', actions, escalated: false, mode: 'model' }
+    if (err instanceof OpenAI.RateLimitError) {
+      return { text: `${label} is rate limiting me — give it a few seconds and ask again.`, actions, escalated: false, mode: 'model' }
     }
-    if (err instanceof Anthropic.APIError) {
-      return { text: `The model returned an error (${err.status}). Falling back: ${(await runFallback(opts)).text}`, actions, escalated: false, mode: 'fallback' }
+    if (err instanceof OpenAI.APIError) {
+      /* A model that cannot do tool calling is the most common 400 here. */
+      console.error(`[assistant] ${label} error ${err.status}:`, err.message)
+      const fallback = await runFallback(opts)
+      return {
+        text: fallback.text,
+        actions: [...actions, ...fallback.actions],
+        pendingOrder: fallback.pendingOrder ?? ctx.pendingOrder,
+        escalated: fallback.escalated,
+        mode: 'fallback',
+      }
     }
     throw err
   }

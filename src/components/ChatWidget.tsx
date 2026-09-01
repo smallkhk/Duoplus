@@ -246,7 +246,11 @@ export function ChatWidget() {
                   : 'Ask anything. Sign in to let it act on your fleet.'}
               </p>
             </div>
-            {fallbackMode && <Badge tone="warn">Basic mode</Badge>}
+            {fallbackMode
+              ? <Badge tone="warn">Basic mode</Badge>
+              : meta?.assistant.provider_label
+                ? <Badge tone="brand">{meta.assistant.provider_label}</Badge>
+                : null}
           </header>
 
           <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
@@ -258,7 +262,7 @@ export function ChatWidget() {
                 </p>
                 {fallbackMode && (
                   <p className="mt-3 rounded-lg border border-warn/30 bg-warn/5 p-2.5 text-[0.74rem] leading-relaxed text-ink-300">
-                    No model credentials are configured on this server, so I am running the basic
+                    No model provider is configured on this server, so I am running the basic
                     intent router. Commands still work; conversation is limited.
                   </p>
                 )}

@@ -28,7 +28,8 @@ server/                      Node + Express API
   fleet.ts        The device engine — the one place device state changes
   billing.ts      Pricing, quotes, orders, provisioning
   knowledge.ts    The knowledge base (serves the /knowledge page AND the assistant)
-  assistant.ts    Claude with tool use, streamed over SSE, plus a no-credential fallback
+  providers.ts    Model provider registry — OpenAI, Gemini, Groq, Mistral, Ollama, …
+  assistant.ts    Model-driven tool use, streamed over SSE, plus a no-provider fallback
   assistant-tools.ts  The tools the assistant can run
   seed.ts         First-boot demo account
 src/                         React + Vite SPA
@@ -120,14 +121,39 @@ gets an Approve button and only `POST /api/orders/:id/pay` — which the assista
 completes it. And **every tool is scoped to the caller's account**, so it cannot reach another
 customer's devices even if it tries.
 
-It runs on `claude-opus-5` with adaptive thinking, streamed to the browser over SSE so tool activity
-appears as it happens rather than at the end. The loop is hand-written rather than using the SDK
-tool runner precisely so each tool call can be emitted mid-flight.
+### Any model provider
 
-**Without model credentials** (`ANTHROPIC_API_KEY` unset) the assistant falls back to a
-deterministic intent router in the same file. It runs the same tools, so restarting a device, buying
-phones and searching the docs all still work — it just cannot converse. The chat header shows
-"Basic mode" so nobody mistakes it for the model.
+The assistant is provider-agnostic. Every supported provider speaks the OpenAI Chat Completions
+wire format, so one client and one code path covers all of them — only the base URL, key and
+default model differ. Adding another is one entry in `server/providers.ts`.
+
+| `MADOVA_AI_PROVIDER` | Key | Default model |
+| --- | --- | --- |
+| `openai` | `OPENAI_API_KEY` | `gpt-4o` |
+| `google` | `GEMINI_API_KEY` | `gemini-2.0-flash` |
+| `groq` | `GROQ_API_KEY` | `llama-3.3-70b-versatile` |
+| `mistral` | `MISTRAL_API_KEY` | `mistral-large-latest` |
+| `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-chat` |
+| `together` | `TOGETHER_API_KEY` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` |
+| `xai` | `XAI_API_KEY` | `grok-2-latest` |
+| `openrouter` | `OPENROUTER_API_KEY` | `openai/gpt-4o-mini` |
+| `ollama` | none — local | `llama3.1` |
+| `custom` | `MADOVA_AI_API_KEY` + `MADOVA_AI_BASE_URL` | anything OpenAI-compatible |
+
+Drop a key into the environment and that is the whole configuration — with `MADOVA_AI_PROVIDER`
+unset, the first provider holding a credential is used. `ollama` and `custom` are never
+auto-selected, since a keyless local endpoint looks available even when nothing is listening;
+name them explicitly. `MADOVA_AI_MODEL` overrides the default model, and the defaults above move
+over time, so pin one for anything you depend on.
+
+Replies stream to the browser over SSE so tool activity appears as it happens. The tool loop is
+hand-written rather than delegated to a framework precisely so each call can be emitted mid-flight.
+
+**Without any provider configured** the assistant falls back to a deterministic intent router in the
+same file. It runs the same tools, so restarting a device, buying phones and searching the docs all
+still work — it just cannot converse. The chat header shows "Basic mode" so nobody mistakes it for
+a model. It also falls back automatically, and logs why, if the provider rejects the credential or
+the chosen model cannot do tool calling.
 
 ## Knowledge base
 
@@ -158,6 +184,11 @@ pretending to succeed.
   registration provisions a trial device; checkout took a fleet from 1 to 6 devices; the assistant
   powered on a named device, and a chat purchase went pending → approved → 9 devices; a wrong
   password is rejected; guest chat answers from the knowledge base.
-- **Not exercised against live services:** this environment had neither an Anthropic key nor a cloud
-  phone key, so the `claude-opus-5` path and the upstream forwarding path are written to their
-  documented contracts but have not been run against the real APIs.
+- The assistant's streaming tool loop was exercised against a mock OpenAI-compatible provider that
+  emits the real SSE frame shapes, including tool calls fragmented across chunks: the call was
+  reassembled, executed against the fleet, and the follow-up reply streamed back. Provider
+  resolution is covered across ten configurations, and both failure paths — a rejected credential
+  and a model that cannot do tool calling — fall back cleanly.
+- **Not exercised against live services:** this environment had no vendor API key and no cloud phone
+  key, so the real provider endpoints and the upstream forwarding path are written to their
+  documented contracts but have not been run against the live APIs.
