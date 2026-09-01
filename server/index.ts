@@ -5,6 +5,9 @@
  * hashes, session signing, order settlement and the model credentials. The SPA
  * talks only to this server.
  */
+/* Must come first: it populates process.env before any module reads config. */
+import { envFile } from './env.js'
+
 import path from 'node:path'
 import express from 'express'
 import cookieParser from 'cookie-parser'
@@ -289,6 +292,7 @@ seed()
 app.listen(PORT, () => {
   console.log(`MADOVA API on http://localhost:${PORT}`)
   console.log(`  static files : ${distDir}`)
+  console.log(`  env file     : ${envFile.loaded ? `${envFile.path} (${envFile.count} applied)` : 'none — using the process environment'}`)
   console.log(`  cloud phones : ${upstreamConfigured() ? 'live upstream' : 'local engine'}`)
   console.log(`  assistant    : ${assistantConfigured()
     ? `${PROVIDER_LABEL} · ${MODEL}`

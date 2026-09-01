@@ -74,7 +74,25 @@ fail on memory or inodes.
 
 ## Step 4 — Environment variables
 
-Still in Setup Node.js App, expand your app and add these under *Environment variables*:
+Two ways to do this — pick one.
+
+**From the terminal (SSH):** create a `.env` file in the application root. The server reads it at
+startup, and real environment variables always take precedence, so this never fights with anything
+the host sets. `.env` is gitignored, so a `git pull` will not touch it.
+
+```bash
+cd ~/madova
+cat > .env <<'EOF'
+MADOVA_SESSION_SECRET=paste-a-long-random-string-here
+MADOVA_DATA_DIR=/home/YOURUSER/madova-data
+NODE_ENV=production
+EOF
+chmod 600 .env
+```
+
+**From cPanel:** Setup Node.js App, expand your app, and add them under *Environment variables*.
+
+Either way, these are the ones that matter:
 
 | Variable | Value | Why |
 | --- | --- | --- |
@@ -90,7 +108,7 @@ Optional, depending on what you want switched on:
 | `MADOVA_AI_MODEL` | Pins a model instead of the provider default. |
 | `MADOVA_UPSTREAM_KEY` | Forwards device calls to the live cloud phone API instead of the built-in engine. |
 
-Press **Save**, then **Restart**.
+Then restart: press **Restart** in Setup Node.js App, or `touch ~/madova/tmp/restart.txt` over SSH.
 
 ## Step 5 — Check it
 
