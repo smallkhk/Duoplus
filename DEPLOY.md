@@ -188,27 +188,60 @@ Optional, depending on what you want switched on:
 
 Then restart: press **Restart** in Setup Node.js App, or `touch ~/madova/tmp/restart.txt` over SSH.
 
-## Step 4b — Stop Apache shadowing the app
+## Step 4b — Lock down the application root
 
-Vite needs its source `index.html` at the project root, and that root is also the Passenger
-application root. Apache serves an existing file before handing the request to Passenger, so
-`https://yourdomain/` returns that unbuilt template — a page referencing `/src/main.tsx`, which no
+**Do this before the site is public.** cPanel points the domain at the application root, and Apache
+serves any file it finds there *before* handing the request to Passenger. Everything in the
+repository is therefore downloadable over HTTPS — including `data/madova.json`, which holds every
+account with its password hash and salt. Dotfiles like `.env` are blocked by cPanel's default rules,
+but nothing else is.
+
+It also means `/` returns Vite's source `index.html` — a page referencing `/src/main.tsx` that no
 browser can run — instead of your app.
 
-Turn off directory indexes for the app so `/` reaches Node:
+Two fixes. First, move the database out of the web root:
 
 ```bash
 cd ~/madova
-cat .htaccess                      # look at what cPanel generated first
-echo 'DirectoryIndex disabled' >> .htaccess
+mkdir -p ~/madova-data
+mv data/madova.json ~/madova-data/ 2>/dev/null
+rmdir data 2>/dev/null
+grep -q MADOVA_DATA_DIR .env || echo "MADOVA_DATA_DIR=$HOME/madova-data" >> .env
+```
+
+Second, stop Apache handing out project files at all. Express already serves everything the browser
+needs, so nothing in the application root has to be publicly readable:
+
+```bash
+cd ~/madova
+cat >> .htaccess <<'EOF'
+
+# Passenger serves the whole app. Apache must not hand out project files.
+DirectoryIndex disabled
+RedirectMatch 404 ^/(data|server|server-dist|src|scripts|node_modules|dist)/
+RedirectMatch 404 ^/index\.html$
+<FilesMatch "\.(ts|tsx|json|md|yml|yaml|map|lock|example)$">
+  Require all denied
+</FilesMatch>
+EOF
 touch tmp/restart.txt
 ```
 
-Append — do not overwrite. cPanel put the Passenger directives in that file and replacing them
-takes the app offline.
+Append — do not overwrite. cPanel put the Passenger directives in that file and replacing them takes
+the app offline.
 
-Confirm it worked: `curl -s https://yourdomain/ | grep -o 'src/main.tsx'` should print nothing, and
-`curl -s https://yourdomain/api/meta` should return JSON.
+Then verify nothing leaks:
+
+```bash
+for p in data/madova.json package.json server/index.ts src/lib/auth.tsx index.html; do
+  echo "$p -> $(curl -s -o /dev/null -w '%{http_code}' https://YOURDOMAIN/$p)"
+done
+```
+
+Every one should be 403 or 404. `/`, `/console` and `/api/meta` should all be 200.
+
+**If the site was already reachable before you did this, treat it as a disclosure.** Rotate
+`MADOVA_SESSION_SECRET` (which signs everyone out), and reset the password of any real account.
 
 ## Step 5 — Check it
 
@@ -275,6 +308,7 @@ output across and touches `tmp/restart.txt` for you.
 | --- | --- |
 | 503 Service Unavailable | Passenger could not start the app. `tail -50 ~/madova/stderr.log` has the reason. Most often the startup file is still cPanel's stub `app.js` rather than `server-dist/app.js`, or the build has not been run so `server-dist/` does not exist. |
 | `/` shows a blank page referencing `/src/main.tsx` | Apache is serving the source `index.html` instead of the app. See Step 4b. |
+| Project files download over HTTPS | The application root is the document root. See Step 4b — this exposes the account database. |
 | `EADDRINUSE` when testing by hand | Passenger already has the app running on that port. That is a healthy sign — pick another port to test with, e.g. `PORT=3999 node server-dist/app.js`. |
 | `Cannot find module 'server-dist/app.js'` | The startup file path is wrong, or `deploy` was never checked out. The path is relative to the application root. |
 | `Cannot use import statement outside a module` | You pointed the startup file at `server/index.ts` instead of `server-dist/app.js`. Passenger runs plain JavaScript only. |
