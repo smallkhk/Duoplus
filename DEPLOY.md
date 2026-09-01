@@ -188,6 +188,28 @@ Optional, depending on what you want switched on:
 
 Then restart: press **Restart** in Setup Node.js App, or `touch ~/madova/tmp/restart.txt` over SSH.
 
+## Step 4b — Stop Apache shadowing the app
+
+Vite needs its source `index.html` at the project root, and that root is also the Passenger
+application root. Apache serves an existing file before handing the request to Passenger, so
+`https://yourdomain/` returns that unbuilt template — a page referencing `/src/main.tsx`, which no
+browser can run — instead of your app.
+
+Turn off directory indexes for the app so `/` reaches Node:
+
+```bash
+cd ~/madova
+cat .htaccess                      # look at what cPanel generated first
+echo 'DirectoryIndex disabled' >> .htaccess
+touch tmp/restart.txt
+```
+
+Append — do not overwrite. cPanel put the Passenger directives in that file and replacing them
+takes the app offline.
+
+Confirm it worked: `curl -s https://yourdomain/ | grep -o 'src/main.tsx'` should print nothing, and
+`curl -s https://yourdomain/api/meta` should return JSON.
+
 ## Step 5 — Check it
 
 Visit your Application URL. You should get the marketing site. Then:
@@ -251,7 +273,9 @@ output across and touches `tmp/restart.txt` for you.
 
 | Symptom | Cause and fix |
 | --- | --- |
-| 503 Service Unavailable | The app crashed on boot. Read `stderr.log` in the application root, or *Setup Node.js App → your app → the log link*. |
+| 503 Service Unavailable | Passenger could not start the app. `tail -50 ~/madova/stderr.log` has the reason. Most often the startup file is still cPanel's stub `app.js` rather than `server-dist/app.js`, or the build has not been run so `server-dist/` does not exist. |
+| `/` shows a blank page referencing `/src/main.tsx` | Apache is serving the source `index.html` instead of the app. See Step 4b. |
+| `EADDRINUSE` when testing by hand | Passenger already has the app running on that port. That is a healthy sign — pick another port to test with, e.g. `PORT=3999 node server-dist/app.js`. |
 | `Cannot find module 'server-dist/app.js'` | The startup file path is wrong, or `deploy` was never checked out. The path is relative to the application root. |
 | `Cannot use import statement outside a module` | You pointed the startup file at `server/index.ts` instead of `server-dist/app.js`. Passenger runs plain JavaScript only. |
 | Signed out on every page load | `MADOVA_SESSION_SECRET` is not set, or `NODE_ENV=production` without HTTPS working yet. |
