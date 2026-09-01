@@ -92,6 +92,38 @@ Create it, then open **Manage** on the repository and switch the checked-out bra
 > Cloning straight into the application directory is the simplest layout: the repository *is* the
 > app, so pulling updates it in place with nothing to copy.
 
+### If the application directory already exists
+
+Creating the Node.js app in cPanel first leaves `~/madova` holding `app.js`, `public/`, `tmp/`,
+`cgi-bin/`, `node_modules/` and `stderr.log`. `git clone` refuses to write into a non-empty
+directory, so cloning there drops the project into a *subfolder* — `~/madova/Duoplus` — and cPanel
+never finds `package.json`, which is where `npm install` fails with a confusing ENOENT pointing at
+the virtualenv.
+
+Attach the repository to the existing directory instead of cloning into it. None of the project's
+files collide with cPanel's scaffolding:
+
+```bash
+cd ~/madova
+rm -rf Duoplus madova                  # remove any nested clones from earlier attempts
+git init
+git remote add origin https://github.com/smallkhk/Duoplus.git
+git fetch origin claude/madova-reseller-website-rt47gr
+git checkout -f -t origin/claude/madova-reseller-website-rt47gr
+```
+
+`package.json` now sits at `~/madova/package.json`, where cPanel expects it.
+
+**About `npm install` on CloudLinux:** the activated `npm` resolves `package.json` through a symlink
+from the virtualenv to the application root. If that symlink was created before the repository
+existed it points at nothing, and `npm install` reports a missing
+`~/nodevenv/madova/20/lib/package.json`. Re-create it by pressing **Run NPM Install** once in
+Setup Node.js App, or call the virtualenv's npm directly, which skips the wrapper:
+
+```bash
+cd ~/madova && ~/nodevenv/madova/20/bin/npm install
+```
+
 ## Step 3 — Create the Node.js application
 
 cPanel → **Setup Node.js App** → **Create Application**.
