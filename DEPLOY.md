@@ -54,20 +54,25 @@ application — this is why `npm: command not found` happens in a fresh SSH sess
 ls -d ~/nodevenv/*/*/bin/activate
 
 # activate it, then build
-source ~/nodevenv/madova/20/bin/activate
+source ~/nodevenv/madova/22/bin/activate
 cd ~/madova
 npm install
 npm run build
 mkdir -p tmp && touch tmp/restart.txt
 ```
 
-Adjust `20` to the Node version you picked. The activate line has to be re-run in every new SSH
+Adjust `22` to the Node version you picked. The activate line has to be re-run in every new SSH
 session; add it to `~/.bashrc` if you build often.
+
+**Node 22 is the floor.** The OpenAI SDK the assistant uses declares `node >=22`, so npm only warns
+on Node 20 and the app can fail at runtime instead. If your host offers nothing newer than 20, pin
+the SDK down a major instead: `npm i openai@^6` — 6.x declares no engine restriction and the code
+compiles against it unchanged.
 
 Updating then becomes:
 
 ```bash
-source ~/nodevenv/madova/20/bin/activate
+source ~/nodevenv/madova/22/bin/activate
 cd ~/madova && git pull && npm install && npm run build && touch tmp/restart.txt
 ```
 
@@ -117,11 +122,11 @@ git checkout -f -t origin/claude/madova-reseller-website-rt47gr
 **About `npm install` on CloudLinux:** the activated `npm` resolves `package.json` through a symlink
 from the virtualenv to the application root. If that symlink was created before the repository
 existed it points at nothing, and `npm install` reports a missing
-`~/nodevenv/madova/20/lib/package.json`. Re-create it by pressing **Run NPM Install** once in
+`~/nodevenv/madova/22/lib/package.json`. Re-create it by pressing **Run NPM Install** once in
 Setup Node.js App, or call the virtualenv's npm directly, which skips the wrapper:
 
 ```bash
-cd ~/madova && ~/nodevenv/madova/20/bin/npm install
+cd ~/madova && ~/nodevenv/madova/22/bin/npm install
 ```
 
 ## Step 3 — Create the Node.js application
@@ -130,7 +135,7 @@ cPanel → **Setup Node.js App** → **Create Application**.
 
 | Field | Value |
 | --- | --- |
-| Node.js version | 18 or newer (20 LTS is a good default) |
+| Node.js version | **22 or newer** — the OpenAI SDK requires it |
 | Application mode | Production |
 | Application root | `madova` |
 | Application URL | your domain or a subdomain, e.g. `madova.yourdomain.com` |
