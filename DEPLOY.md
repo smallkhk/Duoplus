@@ -39,6 +39,41 @@ What ends up on `deploy` that matters to the server:
 | `dist/` | The built front end, served by the API. |
 | `package.json` | Only so cPanel shows the app; nothing is installed from it. |
 
+### Or: build on the server instead
+
+`scripts/release.sh` runs on **your machine**, not the server — it force-pushes to GitHub, and the
+server has no credentials for that. If you would rather work entirely over SSH, skip the deploy
+branch and build in place. It costs about 150 MB and 9,000 files of `node_modules`, which fits
+comfortably inside a Namecheap shared plan's inode quota.
+
+`npm` is not on `PATH` until you activate the Node virtualenv that cPanel creates for the
+application — this is why `npm: command not found` happens in a fresh SSH session:
+
+```bash
+# find the activate script (needs the Node.js app to exist — Step 3)
+ls -d ~/nodevenv/*/*/bin/activate
+
+# activate it, then build
+source ~/nodevenv/madova/20/bin/activate
+cd ~/madova
+npm install
+npm run build
+mkdir -p tmp && touch tmp/restart.txt
+```
+
+Adjust `20` to the Node version you picked. The activate line has to be re-run in every new SSH
+session; add it to `~/.bashrc` if you build often.
+
+Updating then becomes:
+
+```bash
+source ~/nodevenv/madova/20/bin/activate
+cd ~/madova && git pull && npm install && npm run build && touch tmp/restart.txt
+```
+
+If `npm run build` is killed part-way, the plan is out of memory. Retry with a smaller heap:
+`NODE_OPTIONS=--max-old-space-size=512 npm run build`.
+
 ## Step 2 — Clone the repository in cPanel
 
 cPanel → **Git™ Version Control** → **Create**.
