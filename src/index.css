@@ -1,0 +1,139 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ *
+ * MADOVA design tokens
+ * ------------------------------------------------------------------ */
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Brand ramp — violet/indigo */
+  --color-brand-50: #eef0ff;
+  --color-brand-100: #e0e3ff;
+  --color-brand-200: #c6cbff;
+  --color-brand-300: #a3a8ff;
+  --color-brand-400: #857ffb;
+  --color-brand-500: #6d5ef8;
+  --color-brand-600: #5b45ec;
+  --color-brand-700: #4c36cf;
+  --color-brand-800: #3f2ea7;
+  --color-brand-900: #362c84;
+
+  /* Accent — signal cyan */
+  --color-accent-300: #67e8f9;
+  --color-accent-400: #22d3ee;
+  --color-accent-500: #06b6d4;
+
+  /* Neutral ink — cool navy greys */
+  --color-ink-50: #f6f7fb;
+  --color-ink-100: #eceef6;
+  --color-ink-200: #d6d9e8;
+  --color-ink-300: #a9afc9;
+  --color-ink-400: #7b83a4;
+  --color-ink-500: #565e80;
+  --color-ink-600: #3b4263;
+  --color-ink-700: #272d4a;
+  --color-ink-800: #1a1f38;
+  --color-ink-850: #141829;
+  --color-ink-900: #0e1220;
+  --color-ink-950: #080b16;
+
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+  --color-danger: #fb7185;
+
+  --radius-xl2: 1.25rem;
+}
+
+@layer base {
+  * { border-color: color-mix(in srgb, var(--color-ink-700) 70%, transparent); }
+
+  html {
+    scroll-behavior: smooth;
+    color-scheme: dark;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-ink-950);
+    color: var(--color-ink-100);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection { background: color-mix(in srgb, var(--color-brand-500) 45%, transparent); }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-ink-700);
+    border-radius: 9999px;
+    border: 2px solid var(--color-ink-950);
+  }
+  ::-webkit-scrollbar-thumb:hover { background: var(--color-ink-600); }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand-400);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+@layer utilities {
+  /* Page-level ambience: two soft brand lights over deep ink. */
+  .bg-aurora {
+    background-image:
+      radial-gradient(60rem 40rem at 12% -10%, color-mix(in srgb, var(--color-brand-600) 32%, transparent), transparent 60%),
+      radial-gradient(45rem 35rem at 90% 0%, color-mix(in srgb, var(--color-accent-500) 18%, transparent), transparent 55%);
+  }
+
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, color-mix(in srgb, var(--color-ink-200) 5%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in srgb, var(--color-ink-200) 5%, transparent) 1px, transparent 1px);
+    background-size: 56px 56px;
+  }
+
+  .mask-fade-b { mask-image: linear-gradient(to bottom, black 55%, transparent 100%); }
+
+  .text-gradient {
+    background: linear-gradient(155deg, var(--color-ink-50) 5%, var(--color-brand-200) 52%, var(--color-accent-300) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* 1px gradient hairline used on cards and the nav bar. */
+  .ring-hairline {
+    box-shadow: inset 0 1px 0 0 color-mix(in srgb, white 8%, transparent);
+  }
+
+  .glass {
+    background: color-mix(in srgb, var(--color-ink-900) 72%, transparent);
+    backdrop-filter: blur(14px) saturate(140%);
+  }
+
+  .animate-marquee { animation: marquee 38s linear infinite; }
+  @keyframes marquee {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-50%); }
+  }
+
+  .animate-rise { animation: rise .6s cubic-bezier(.22,1,.36,1) both; }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  .animate-pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .35; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-marquee, .animate-rise, .animate-pulse-dot { animation: none !important; }
+    html { scroll-behavior: auto; }
+  }
+}
