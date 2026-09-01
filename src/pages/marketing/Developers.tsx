@@ -9,7 +9,8 @@ import {
   API_BASE_URL, API_GROUPS, API_KEY_HEADER, API_QPS_LIMIT, ENDPOINTS, ERROR_CODES,
   type ApiEndpoint,
 } from '@/lib/duoplus/endpoints'
-import { call, getSettings } from '@/lib/duoplus/client'
+import { call } from '@/lib/duoplus/client'
+import { useAuth } from '@/lib/auth'
 
 export function Developers() {
   const [activeId, setActiveId] = useState(ENDPOINTS[0].id)
@@ -411,18 +412,17 @@ function ParamTable({
 
 function Playground({ endpoint }: { endpoint: ApiEndpoint }) {
   const toast = useToast()
+  const { user, meta } = useAuth()
   const [body, setBody] = useState(() => JSON.stringify(endpoint.exampleRequest, null, 2))
   const [result, setResult] = useState<string | null>(null)
-  const [meta, setMeta] = useState<{ code: number; ms: number; live: boolean } | null>(null)
+  const [outcome, setOutcome] = useState<{ code: number; ms: number } | null>(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     setBody(JSON.stringify(endpoint.exampleRequest, null, 2))
     setResult(null)
-    setMeta(null)
+    setOutcome(null)
   }, [endpoint.id])
-
-  const settings = getSettings()
 
   const send = async () => {
     let parsed: Record<string, unknown>
@@ -437,14 +437,10 @@ function Playground({ endpoint }: { endpoint: ApiEndpoint }) {
     try {
       const envelope = await call(endpoint.path, parsed)
       setResult(JSON.stringify(envelope, null, 2))
-      setMeta({
-        code: envelope.code,
-        ms: Math.round(performance.now() - started),
-        live: settings.live && !!settings.apiKey,
-      })
+      setOutcome({ code: envelope.code, ms: Math.round(performance.now() - started) })
     } catch (err) {
       setResult(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }, null, 2))
-      setMeta({ code: 0, ms: Math.round(performance.now() - started), live: true })
+      setOutcome({ code: 0, ms: Math.round(performance.now() - started) })
     } finally {
       setBusy(false)
     }
@@ -453,14 +449,15 @@ function Playground({ endpoint }: { endpoint: ApiEndpoint }) {
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-ink-700/70 bg-ink-900/50 px-4 py-3">
-        <Icon name={settings.live && settings.apiKey ? 'bolt' : 'info'} className="size-4 shrink-0 text-brand-300" />
+        <Icon name={user ? 'bolt' : 'lock'} className="size-4 shrink-0 text-brand-300" />
         <p className="flex-1 text-[0.8rem] text-ink-300">
-          {settings.live && settings.apiKey
-            ? <>Live mode — calls go to <code className="font-mono text-ink-100">{API_BASE_URL}</code> with your key.</>
-            : <>Sandbox mode — calls are answered by the in-browser mock fleet. Add a key in the console to go live.</>}
+          {user
+            ? <>Signed in as {user.name} — this runs against your own account
+                {meta?.cloud.upstream ? <>, forwarded to <code className="font-mono text-ink-100">{API_BASE_URL}</code></> : ' on the MADOVA engine'}.</>
+            : <>Sign in to run a call. The playground uses your session, so it only ever touches your own devices.</>}
         </p>
-        <Link to="/console/api" className="text-[0.78rem] font-medium text-brand-300 hover:text-brand-200">
-          API settings →
+        <Link to={user ? '/console/api' : '/login'} className="text-[0.78rem] font-medium text-brand-300 hover:text-brand-200">
+          {user ? 'API settings →' : 'Sign in →'}
         </Link>
       </div>
 
@@ -486,8 +483,8 @@ function Playground({ endpoint }: { endpoint: ApiEndpoint }) {
             className="w-full resize-y rounded-xl border border-ink-700 bg-ink-950 p-4 font-mono text-[0.78rem] leading-relaxed text-ink-100 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/25"
           />
           <div className="mt-3 flex items-center gap-3">
-            <Button onClick={send} disabled={busy} icon={busy ? undefined : 'play'}>
-              {busy ? 'Sending…' : `Send ${endpoint.method}`}
+            <Button onClick={send} disabled={busy || !user} icon={busy ? undefined : 'play'}>
+              {busy ? 'Sending…' : !user ? 'Sign in to send' : `Send ${endpoint.method}`}
             </Button>
             <span className="font-mono text-[0.72rem] text-ink-500">{endpoint.path}</span>
           </div>
@@ -498,11 +495,10 @@ function Playground({ endpoint }: { endpoint: ApiEndpoint }) {
             <span className="text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-ink-500">
               Response
             </span>
-            {meta && (
+            {outcome && (
               <span className="flex items-center gap-2">
-                <Badge tone={meta.code === 200 ? 'ok' : 'danger'}>{meta.code || 'error'}</Badge>
-                <span className="font-mono text-[0.7rem] text-ink-500">{meta.ms} ms</span>
-                <Badge tone={meta.live ? 'brand' : 'neutral'}>{meta.live ? 'live' : 'sandbox'}</Badge>
+                <Badge tone={outcome.code === 200 ? 'ok' : 'danger'}>{outcome.code || 'error'}</Badge>
+                <span className="font-mono text-[0.7rem] text-ink-500">{outcome.ms} ms</span>
               </span>
             )}
           </div>

@@ -3,7 +3,7 @@ import { PageHeader } from '@/components/ConsoleLayout'
 import { Icon } from '@/components/Icon'
 import { Badge, Button, Card, Field, Modal, Select, cx, useToast } from '@/components/ui'
 import { callData } from '@/lib/duoplus/client'
-import { DRIVE_FILES, GROUPS } from '@/lib/duoplus/mock'
+import { DRIVE_FILES, GROUPS } from '@/data/demo'
 import type { CloudDriveFile } from '@/lib/duoplus/types'
 
 const KIND_ICON: Record<CloudDriveFile['kind'], string> = {

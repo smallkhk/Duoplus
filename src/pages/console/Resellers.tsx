@@ -5,7 +5,7 @@ import { Icon } from '@/components/Icon'
 import {
   Badge, Button, Card, Field, Input, Modal, Select, Tabs, cx, useToast,
 } from '@/components/ui'
-import { SUB_ACCOUNTS } from '@/lib/duoplus/mock'
+import { SUB_ACCOUNTS } from '@/data/demo'
 import type { SubAccount } from '@/lib/duoplus/types'
 
 const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })

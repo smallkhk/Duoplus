@@ -1,27 +1,65 @@
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Logo } from '@/components/Logo'
 import { Icon } from '@/components/Icon'
 import { PhoneFrame } from '@/components/PhoneFrame'
-import { Button, Field, Input, Select, cx, useToast } from '@/components/ui'
+import { Badge, Button, Field, Input, Select, cx, useToast } from '@/components/ui'
 import { BRAND, STATS } from '@/data/site'
+import { useAuth } from '@/lib/auth'
+import { ApiError } from '@/lib/api'
 
 type Mode = 'login' | 'register'
 
 function AuthShell({ mode }: { mode: Mode }) {
   const navigate = useNavigate()
+  const location = useLocation()
   const toast = useToast()
+  const { user, ready, login, register, meta } = useAuth()
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const isLogin = mode === 'login'
 
-  const submit = (e: React.FormEvent) => {
+  const destination = (location.state as { from?: string } | null)?.from ?? '/console'
+
+  /* Already signed in — don't make them log in twice. */
+  useEffect(() => {
+    if (ready && user) navigate(destination, { replace: true })
+  }, [ready, user, destination, navigate])
+
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    const form = new FormData(e.currentTarget)
     setBusy(true)
-    /* Demo build: no auth backend, so we drop straight into the console. */
-    setTimeout(() => {
-      toast(isLogin ? 'Signed in to the demo console.' : 'Account created — your trial phone is provisioning.', 'ok')
-      navigate('/console')
-    }, 550)
+    setError(null)
+    try {
+      if (isLogin) {
+        await login(String(form.get('email') ?? ''), String(form.get('password') ?? ''))
+        toast('Signed in.', 'ok')
+      } else {
+        await register({
+          email: String(form.get('email') ?? ''),
+          password: String(form.get('password') ?? ''),
+          name: String(form.get('name') ?? ''),
+          company: String(form.get('company') ?? ''),
+          use_case: String(form.get('use_case') ?? ''),
+        })
+        toast('Account created — your free trial device is ready.', 'ok')
+      }
+      navigate(destination, { replace: true })
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Something went wrong. Try again.'
+      setError(message)
+      toast(message, 'danger')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const fillDemo = (form: HTMLFormElement) => {
+    const email = form.elements.namedItem('email') as HTMLInputElement | null
+    const password = form.elements.namedItem('password') as HTMLInputElement | null
+    if (email) email.value = meta?.demo_account.email ?? 'demo@madova.io'
+    if (password) password.value = 'madova-demo-2026'
   }
 
   return (
@@ -70,14 +108,19 @@ function AuthShell({ mode }: { mode: Mode }) {
             </div>
 
             <form className="space-y-4" onSubmit={submit}>
+              {error && (
+                <p role="alert" className="rounded-lg border border-danger/30 bg-danger/5 px-3.5 py-2.5 text-[0.82rem] leading-relaxed text-danger">
+                  {error}
+                </p>
+              )}
               {!isLogin && (
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Full name"><Input required placeholder="Jules Ardan" autoComplete="name" /></Field>
-                  <Field label="Company"><Input placeholder="Northwind Media" autoComplete="organization" /></Field>
+                  <Field label="Full name"><Input required name="name" placeholder="Jules Ardan" autoComplete="name" /></Field>
+                  <Field label="Company"><Input name="company" placeholder="Northwind Media" autoComplete="organization" /></Field>
                 </div>
               )}
               <Field label="Work email">
-                <Input required type="email" placeholder="you@company.com" autoComplete="email" />
+                <Input required name="email" type="email" placeholder="you@company.com" autoComplete="email" />
               </Field>
               <Field
                 label="Password"
@@ -85,14 +128,16 @@ function AuthShell({ mode }: { mode: Mode }) {
               >
                 <Input
                   required
+                  name="password"
                   type="password"
+                  minLength={isLogin ? undefined : 10}
                   placeholder="••••••••••"
                   autoComplete={isLogin ? 'current-password' : 'new-password'}
                 />
               </Field>
               {!isLogin && (
                 <Field label="What will you use phones for?">
-                  <Select defaultValue="Social media & creators">
+                  <Select name="use_case" defaultValue="Social media & creators">
                     {[
                       'Social media & creators', 'E-commerce & marketplaces', 'Airdrop & web3',
                       'App QA & testing', 'Ad operations', 'Reselling to my customers', 'Something else',
@@ -109,7 +154,7 @@ function AuthShell({ mode }: { mode: Mode }) {
                   </label>
                   <button
                     type="button"
-                    onClick={() => toast('Password reset is not wired up in this demo build.', 'info')}
+                    onClick={() => toast('Password reset is not wired up yet — email support to reset.', 'info')}
                     className="text-[0.8rem] text-brand-300 hover:text-brand-200"
                   >
                     Forgot password?
@@ -120,11 +165,22 @@ function AuthShell({ mode }: { mode: Mode }) {
               <Button type="submit" size="lg" className="w-full" disabled={busy} iconRight={busy ? undefined : 'arrowRight'}>
                 {busy ? 'One moment…' : isLogin ? 'Sign in' : 'Create account'}
               </Button>
+
+              {isLogin && (
+                <button
+                  type="button"
+                  onClick={(e) => fillDemo(e.currentTarget.form!)}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-ink-700 py-2 text-[0.78rem] text-ink-400 transition-colors hover:border-brand-500/50 hover:text-ink-100"
+                >
+                  <Badge tone="brand">Demo</Badge>
+                  Fill the demo account — a fleet of 148 devices
+                </button>
+              )}
             </form>
 
             <p className="mt-5 text-center text-[0.74rem] leading-relaxed text-ink-500">
               {isLogin ? (
-                <>This demo build has no auth backend — any credentials open the console.</>
+                <>Sessions are httpOnly cookies signed server-side. No credentials are held in the browser.</>
               ) : (
                 <>
                   By creating an account you agree to the{' '}

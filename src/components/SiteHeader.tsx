@@ -91,7 +91,7 @@ export function SiteHeader() {
               <NavLink to="/pricing" className={linkCls}>Pricing</NavLink>
               <NavLink to="/reseller" className={linkCls}>Resellers</NavLink>
               <NavLink to="/developers" className={linkCls}>Developers</NavLink>
-              <NavLink to="/download" className={linkCls}>Download</NavLink>
+              <NavLink to="/knowledge" className={linkCls}>Help</NavLink>
             </nav>
           </div>
 
@@ -171,6 +171,7 @@ export function SiteHeader() {
                 { label: 'Pricing', to: '/pricing' },
                 { label: 'Resellers', to: '/reseller' },
                 { label: 'Developers', to: '/developers' },
+                { label: 'Help centre', to: '/knowledge' },
                 { label: 'Download', to: '/download' },
                 { label: 'Contact', to: '/contact' },
               ].map((l) => (

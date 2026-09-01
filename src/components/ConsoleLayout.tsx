@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Logo, LogoMark } from './Logo'
 import { Icon } from './Icon'
 import { Badge, Input, cx } from './ui'
-import { getSettings } from '@/lib/duoplus/client'
+import { useAuth } from '@/lib/auth'
 
 const NAV: { section: string; items: { to: string; label: string; icon: string; end?: boolean }[] }[] = [
   {
@@ -13,6 +13,7 @@ const NAV: { section: string; items: { to: string; label: string; icon: string; 
       { to: '/console/phones', label: 'Cloud phones', icon: 'phone' },
       { to: '/console/groups', label: 'Groups', icon: 'layers' },
       { to: '/console/proxies', label: 'Proxies', icon: 'route' },
+      { to: '/console/store', label: 'Buy devices', icon: 'wallet' },
     ],
   },
   {
@@ -44,22 +45,15 @@ const NAV: { section: string; items: { to: string; label: string; icon: string; 
 export function ConsoleLayout() {
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [live, setLive] = useState(() => {
-    const s = getSettings()
-    return s.live && !!s.apiKey
-  })
   const location = useLocation()
+  const navigate = useNavigate()
+  const { user, account, meta, logout } = useAuth()
+
+  const live = Boolean(meta?.cloud.upstream)
+  const onTrial = (account?.plan ?? user?.plan) === 'trial'
+  const initials = (user?.name ?? 'MA').split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase()
 
   useEffect(() => { setMobileOpen(false) }, [location.pathname])
-
-  useEffect(() => {
-    const sync = () => {
-      const s = getSettings()
-      setLive(s.live && !!s.apiKey)
-    }
-    window.addEventListener('madova:settings', sync)
-    return () => window.removeEventListener('madova:settings', sync)
-  }, [])
 
   return (
     <div className="flex min-h-dvh bg-ink-950">
@@ -135,27 +129,31 @@ export function ConsoleLayout() {
           {!collapsed ? (
             <div className="rounded-xl bg-ink-950/70 p-3.5 ring-1 ring-inset ring-ink-800">
               <div className="flex items-center justify-between">
-                <span className="text-[0.72rem] font-medium text-ink-300">Trial</span>
-                <Badge tone="warn">21 days left</Badge>
+                <span className="text-[0.72rem] font-medium capitalize text-ink-300">
+                  {account?.plan ?? user?.plan ?? 'trial'} plan
+                </span>
+                <Badge tone={onTrial ? 'warn' : 'ok'}>
+                  {account ? `${account.phones_total} device${account.phones_total === 1 ? '' : 's'}` : '—'}
+                </Badge>
               </div>
-              <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-ink-800">
-                <div className="h-full w-[30%] rounded-full bg-gradient-to-r from-brand-500 to-accent-400" />
-              </div>
+              <p className="mt-2 text-[0.68rem] text-ink-500">
+                {(account?.minutes_balance ?? 0).toLocaleString('en-US')} prepaid minutes
+              </p>
               <Link
-                to="/console/billing"
+                to="/console/store"
                 className="mt-3 flex items-center justify-center gap-1.5 rounded-lg bg-brand-500 py-1.5 text-[0.76rem] font-medium text-white transition-colors hover:bg-brand-400"
               >
-                Upgrade
+                {onTrial ? 'Buy devices' : 'Add devices'}
                 <Icon name="arrowRight" className="size-3" />
               </Link>
             </div>
           ) : (
             <Link
-              to="/console/billing"
+              to="/console/store"
               className="grid size-10 place-items-center rounded-lg bg-brand-500/15 text-brand-300 hover:bg-brand-500/25"
-              title="Upgrade"
+              title="Buy devices"
             >
-              <Icon name="bolt" className="size-4" />
+              <Icon name="wallet" className="size-4" />
             </Link>
           )}
         </div>
@@ -190,10 +188,12 @@ export function ConsoleLayout() {
                   ? 'bg-ok/10 text-ok ring-ok/30 hover:bg-ok/15'
                   : 'bg-ink-900 text-ink-400 ring-ink-700 hover:text-ink-200',
               )}
-              title={live ? 'Calls go to the live API' : 'Calls are answered by the sandbox fleet'}
+              title={live
+                ? 'Device calls are forwarded to the live cloud phone API'
+                : 'Device calls are served by the MADOVA engine on this server'}
             >
               <span className={cx('size-1.5 rounded-full', live ? 'animate-pulse-dot bg-ok' : 'bg-ink-500')} />
-              {live ? 'Live API' : 'Sandbox'}
+              {live ? 'Live upstream' : 'MADOVA engine'}
             </Link>
 
             <button
@@ -209,13 +209,24 @@ export function ConsoleLayout() {
               className="flex items-center gap-2.5 rounded-lg py-1 pl-1 pr-2.5 transition-colors hover:bg-ink-800"
             >
               <span className="grid size-8 place-items-center rounded-full bg-gradient-to-br from-brand-500 to-accent-500 text-[0.72rem] font-semibold text-white">
-                AO
+                {initials}
               </span>
               <span className="hidden text-left sm:block">
-                <span className="block text-[0.78rem] font-medium leading-tight text-ink-100">Amara Osei</span>
-                <span className="block text-[0.68rem] leading-tight text-ink-500">Owner · MADOVA</span>
+                <span className="block text-[0.78rem] font-medium leading-tight text-ink-100">{user?.name ?? 'Account'}</span>
+                <span className="block text-[0.68rem] capitalize leading-tight text-ink-500">
+                  {user?.role ?? 'owner'}{user?.company ? ` · ${user.company}` : ''}
+                </span>
               </span>
             </Link>
+
+            <button
+              onClick={() => { void logout().then(() => navigate('/login')) }}
+              className="rounded-lg p-2 text-ink-400 hover:bg-ink-800 hover:text-ink-100"
+              aria-label="Sign out"
+              title="Sign out"
+            >
+              <Icon name="logout" className="size-4.5" />
+            </button>
           </div>
         </header>
 

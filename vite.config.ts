@@ -11,12 +11,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // Dev-only passthrough to the upstream cloud-phone OpenAPI so the console
-      // can talk to the live backend without CORS. See src/lib/duoplus/client.ts
-      '/upstream': {
-        target: 'https://openapi.duoplus.net',
+      // The SPA never talks to the cloud phone API directly — every call goes
+      // through the MADOVA API server, which holds the key. See server/index.ts
+      '/api': {
+        target: process.env.MADOVA_API_ORIGIN ?? 'http://localhost:8787',
         changeOrigin: true,
-        rewrite: (p) => p.replace(/^\/upstream/, ''),
       },
     },
   },

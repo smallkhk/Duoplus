@@ -5,7 +5,8 @@ import { AreaChart, BarList, Donut, Heatmap } from '@/components/Charts'
 import { Icon } from '@/components/Icon'
 import { Badge, ButtonLink, Card, Dot, Skeleton, cx } from '@/components/ui'
 import { callData } from '@/lib/duoplus/client'
-import { AUTOMATIONS, PROXIES, REGION_INDEX, SUB_ACCOUNTS, USAGE_30D } from '@/lib/duoplus/mock'
+import { AUTOMATIONS, REGION_INDEX, SUB_ACCOUNTS, USAGE_30D } from '@/data/demo'
+import { useProxies } from '@/lib/hooks'
 import { PHONE_STATUS_LABEL, PhoneStatus, type CloudPhone, type Paged } from '@/lib/duoplus/types'
 
 const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
@@ -13,6 +14,7 @@ const num = (n: number) => n.toLocaleString('en-US')
 
 export function Overview() {
   const [phones, setPhones] = useState<CloudPhone[] | null>(null)
+  const proxies = useProxies()
 
   useEffect(() => {
     let cancelled = false
@@ -59,7 +61,8 @@ export function Overview() {
 
   const minutesThisMonth = USAGE_30D.reduce((s, d) => s + d.minutes, 0)
   const revenueThisMonth = SUB_ACCOUNTS.reduce((s, a) => s + a.mrr, 0)
-  const unhealthyProxies = PROXIES.filter((p) => !p.healthy).length
+  const proxyList = proxies ?? []
+  const unhealthyProxies = proxyList.filter((p) => !p.healthy).length
 
   return (
     <>
@@ -101,7 +104,7 @@ export function Overview() {
         />
         <Kpi
           label="Proxy health"
-          value={`${PROXIES.length - unhealthyProxies}/${PROXIES.length}`}
+          value={proxies === null ? null : `${proxyList.length - unhealthyProxies}/${proxyList.length}`}
           delta={unhealthyProxies > 0 ? `${unhealthyProxies} failing` : 'all healthy'}
           tone={unhealthyProxies > 0 ? 'warn' : 'ok'}
           icon="route"

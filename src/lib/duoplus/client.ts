@@ -1,51 +1,17 @@
 /**
- * MADOVA API client.
+ * Cloud phone client.
  *
- * Speaks the upstream cloud-phone OpenAPI: `POST {base}/api/v1/...`, JSON body,
- * `DuoPlus-API-Key` header, `{ code, data, message }` envelope.
+ * Every device call goes to the MADOVA API server, which decides whether it
+ * resolves against the local engine or the real upstream OpenAPI and attaches
+ * the key. The browser holds no credentials, so there is nothing here to leak.
  *
- * With no key configured it routes to the in-browser mock so the console is
- * fully explorable. Paste a key in Console → Automation → API and flip to live
- * mode and the exact same calls go to the real backend. In `npm run dev` the
- * requests travel through the `/upstream` Vite proxy to sidestep CORS; a
- * deployment should terminate that proxy server-side so the key never ships to
- * the browser.
+ * The request shape below still mirrors the upstream contract exactly — path,
+ * JSON body and the `{ code, data, message }` envelope — so the same calls work
+ * against either backend.
  */
-import { API_KEY_HEADER } from './endpoints'
-import { mockRequest } from './mock'
 import type { ApiEnvelope } from './types'
 
 export type Lang = 'en' | 'zh' | 'zh-TW' | 'ru'
-
-export interface ApiSettings {
-  apiKey: string
-  live: boolean
-  lang: Lang
-}
-
-const SETTINGS_KEY = 'madova.api.settings'
-
-const DEFAULT_SETTINGS: ApiSettings = { apiKey: '', live: false, lang: 'en' }
-
-export function getSettings(): ApiSettings {
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY)
-    return raw ? { ...DEFAULT_SETTINGS, ...JSON.parse(raw) } : DEFAULT_SETTINGS
-  } catch {
-    return DEFAULT_SETTINGS
-  }
-}
-
-export function saveSettings(next: Partial<ApiSettings>): ApiSettings {
-  const merged = { ...getSettings(), ...next }
-  try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged))
-  } catch {
-    /* private browsing — settings simply don't persist */
-  }
-  window.dispatchEvent(new CustomEvent('madova:settings'))
-  return merged
-}
 
 export interface RequestLogEntry {
   id: number
@@ -53,7 +19,6 @@ export interface RequestLogEntry {
   path: string
   ms: number
   code: number
-  live: boolean
   ok: boolean
 }
 
@@ -70,11 +35,38 @@ function record(entry: Omit<RequestLogEntry, 'id'>) {
   window.dispatchEvent(new CustomEvent('madova:request'))
 }
 
+const LANG_KEY = 'madova.lang'
+
+export function getLang(): Lang {
+  try {
+    return (localStorage.getItem(LANG_KEY) as Lang) || 'en'
+  } catch {
+    return 'en'
+  }
+}
+
+export function setLang(lang: Lang) {
+  try {
+    localStorage.setItem(LANG_KEY, lang)
+  } catch {
+    /* private browsing — the preference just doesn't persist */
+  }
+  window.dispatchEvent(new CustomEvent('madova:settings'))
+}
+
+export class ApiError extends Error {
+  constructor(public code: number, message: string, public path: string) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
 /**
- * Upstream enforces 1 QPS per endpoint, so calls are serialised through a
- * single promise chain with a minimum spacing between them.
+ * The upstream API allows 1 QPS per endpoint. The server enforces that for
+ * forwarded traffic; serialising here as well keeps a busy console from
+ * queueing a burst it will only have to wait out.
  */
-const MIN_SPACING_MS = 120
+const MIN_SPACING_MS = 60
 let chain: Promise<unknown> = Promise.resolve()
 
 function serialise<T>(task: () => Promise<T>): Promise<T> {
@@ -86,42 +78,24 @@ function serialise<T>(task: () => Promise<T>): Promise<T> {
   return next
 }
 
-export class ApiError extends Error {
-  constructor(public code: number, message: string, public path: string) {
-    super(message)
-    this.name = 'ApiError'
-  }
-}
-
 /** Issue a call and return the raw envelope. */
 export async function call<T = unknown>(
   path: string,
   body: Record<string, unknown> = {},
 ): Promise<ApiEnvelope<T>> {
   return serialise(async () => {
-    const settings = getSettings()
-    const useLive = settings.live && settings.apiKey.trim().length > 0
     const started = performance.now()
-
     let envelope: ApiEnvelope<T>
     try {
-      if (useLive) {
-        const res = await fetch(`/upstream${path}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Lang: settings.lang,
-            [API_KEY_HEADER]: settings.apiKey.trim(),
-          },
-          body: JSON.stringify(body),
-        })
-        envelope = (await res.json()) as ApiEnvelope<T>
-      } else {
-        envelope = (await mockRequest(path, body)) as ApiEnvelope<T>
-      }
+      const res = await fetch('/api/cloud', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, body, lang: getLang() }),
+      })
+      envelope = (await res.json()) as ApiEnvelope<T>
     } catch (err) {
-      const ms = Math.round(performance.now() - started)
-      record({ at: new Date().toLocaleTimeString(), path, ms, code: 0, live: useLive, ok: false })
+      record({ at: new Date().toLocaleTimeString(), path, ms: Math.round(performance.now() - started), code: 0, ok: false })
       throw new ApiError(0, err instanceof Error ? err.message : 'Network error', path)
     }
 
@@ -130,7 +104,6 @@ export async function call<T = unknown>(
       path,
       ms: Math.round(performance.now() - started),
       code: envelope.code,
-      live: useLive,
       ok: envelope.code === 200,
     })
     return envelope

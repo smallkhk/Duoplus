@@ -5,12 +5,14 @@ import {
   Badge, Button, Card, CopyButton, EmptyState, Skeleton, cx, useToast,
 } from '@/components/ui'
 import { callData } from '@/lib/duoplus/client'
-import { CLOUD_NUMBERS, PHONES } from '@/lib/duoplus/mock'
+import { CLOUD_NUMBERS } from '@/data/demo'
+import { useAllPhones } from '@/lib/hooks'
 import type { CloudNumber, Paged, SmsMessage } from '@/lib/duoplus/types'
 
 export function Numbers() {
   const toast = useToast()
-  const [active, setActive] = useState<CloudNumber>(CLOUD_NUMBERS[1])
+  const [active, setActive] = useState<CloudNumber & { bound_index: number | null }>(CLOUD_NUMBERS[1])
+  const { phones } = useAllPhones()
   const [sms, setSms] = useState<SmsMessage[] | null>(null)
 
   useEffect(() => {
@@ -24,7 +26,7 @@ export function Numbers() {
     return () => { cancelled = true }
   }, [active.id])
 
-  const boundPhone = PHONES.find((p) => p.id === active.bound_image_id)
+  const boundPhone = active.bound_index === null ? undefined : (phones ?? [])[active.bound_index % Math.max(1, (phones ?? []).length)]
 
   return (
     <>
@@ -60,7 +62,7 @@ export function Numbers() {
                     <span className="block truncate font-mono text-[0.8rem] text-ink-100">{n.msisdn}</span>
                     <span className="block truncate text-[0.7rem] text-ink-500">{n.operator}</span>
                   </span>
-                  {n.bound_image_id
+                  {n.bound_index !== null
                     ? <Icon name="phone" className="size-3.5 shrink-0 text-brand-300" />
                     : <span className="shrink-0 text-[0.66rem] text-ink-600">unbound</span>}
                 </button>

@@ -61,6 +61,13 @@ export const FEATURES: Feature[] = [
     icon: 'terminal',
   },
   {
+    slug: 'assistant',
+    title: 'An assistant that operates the fleet',
+    blurb: 'Ask in plain language and it acts — powers devices, changes settings, prepares orders, answers from the docs.',
+    detail: 'The assistant is wired to your account, not to a canned FAQ. It reads your fleet, powers devices on and off, restarts them, rewrites GPS and locale, runs an ADB command and looks anything up in the knowledge base. Anything that spends money is prepared as an order only you can approve, and it can only ever touch devices on your own account.',
+    icon: 'sparkle',
+  },
+  {
     slug: 'automation',
     title: 'Automation & RPA',
     blurb: 'Schedules, webhooks and recorded flows that fan out across thousands of phones.',
@@ -426,6 +433,7 @@ export const FOOTER_LINKS = [
       { label: 'Solutions', to: '/solutions' },
       { label: 'Pricing', to: '/pricing' },
       { label: 'Developer API', to: '/developers' },
+      { label: 'Help centre', to: '/knowledge' },
       { label: 'Download', to: '/download' },
     ],
   },
@@ -446,6 +454,7 @@ export const FOOTER_LINKS = [
     heading: 'Company',
     links: [
       { label: 'Console', to: '/console' },
+      { label: 'Buy devices', to: '/console/store' },
       { label: 'Sign in', to: '/login' },
       { label: 'Create account', to: '/register' },
       { label: 'Contact', to: '/contact' },

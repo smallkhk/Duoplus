@@ -5,13 +5,14 @@ import {
   Badge, Button, Card, Field, Input, Modal, Skeleton, Textarea, useToast,
 } from '@/components/ui'
 import { callData } from '@/lib/duoplus/client'
-import { PHONES } from '@/lib/duoplus/mock'
+import { useAllPhones } from '@/lib/hooks'
 import type { Paged, PhoneGroup } from '@/lib/duoplus/types'
 
 export function Groups() {
   const toast = useToast()
   const [groups, setGroups] = useState<PhoneGroup[] | null>(null)
   const [open, setOpen] = useState(false)
+  const { phones } = useAllPhones()
 
   useEffect(() => {
     callData<Paged<PhoneGroup>>('/api/v1/cloudPhone/groupList', { page: 1 })
@@ -19,7 +20,7 @@ export function Groups() {
       .catch(() => setGroups([]))
   }, [])
 
-  const countFor = (id: string) => PHONES.filter((p) => p.group.some((g) => g.id === id)).length
+  const countFor = (id: string) => (phones ?? []).filter((p) => p.group.some((g) => g.id === id)).length
 
   return (
     <>

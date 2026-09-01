@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom'
 import { PageHeader } from '@/components/ConsoleLayout'
 import { Icon } from '@/components/Icon'
 import {
-  Badge, Button, Card, Code, CopyButton, Field, Input, Modal, Select, Toggle, cx, useToast,
+  Badge, Button, Card, Code, CopyButton, Field, Input, Modal, Select, cx, useToast,
 } from '@/components/ui'
-import { getRequestLog, getSettings, saveSettings, type Lang, type RequestLogEntry } from '@/lib/duoplus/client'
+import { getLang, getRequestLog, setLang, type Lang, type RequestLogEntry } from '@/lib/duoplus/client'
+import { useAuth } from '@/lib/auth'
 import { API_BASE_URL, API_KEY_HEADER, API_QPS_LIMIT, ENDPOINTS } from '@/lib/duoplus/endpoints'
 
 const DEMO_KEYS = [
@@ -16,23 +17,19 @@ const DEMO_KEYS = [
 
 export function ApiKeys() {
   const toast = useToast()
-  const [settings, setSettings] = useState(getSettings)
-  const [keyInput, setKeyInput] = useState(settings.apiKey)
+  const { meta } = useAuth()
+  const [lang, setLangState] = useState<Lang>(getLang)
   const [log, setLog] = useState<RequestLogEntry[]>(getRequestLog())
   const [createOpen, setCreateOpen] = useState(false)
   const [revealed, setRevealed] = useState<string | null>(null)
+
+  const upstream = Boolean(meta?.cloud.upstream)
 
   useEffect(() => {
     const sync = () => setLog([...getRequestLog()])
     window.addEventListener('madova:request', sync)
     return () => window.removeEventListener('madova:request', sync)
   }, [])
-
-  const update = (patch: Parameters<typeof saveSettings>[0]) => {
-    setSettings(saveSettings(patch))
-  }
-
-  const liveReady = settings.live && settings.apiKey.trim().length > 0
 
   return (
     <>
@@ -59,74 +56,46 @@ export function ApiKeys() {
           <Card className="p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <h2 className="text-[0.95rem] font-semibold text-ink-50">Connection mode</h2>
+                <h2 className="text-[0.95rem] font-semibold text-ink-50">Where device calls go</h2>
                 <p className="mt-1.5 max-w-md text-[0.82rem] leading-relaxed text-ink-400">
-                  Sandbox answers every call from an in-browser fleet so the console is explorable
-                  without credentials. Live mode sends the same requests to{' '}
-                  <code className="font-mono text-ink-300">{API_BASE_URL}</code>.
+                  The browser never holds a cloud phone key. Every call from this console posts to
+                  the MADOVA API server, which attaches the key and decides where it resolves.
                 </p>
               </div>
               <span className={cx(
                 'flex items-center gap-2 rounded-lg px-3 py-1.5 text-[0.78rem] font-medium ring-1 ring-inset',
-                liveReady ? 'bg-ok/10 text-ok ring-ok/30' : 'bg-ink-900 text-ink-400 ring-ink-700',
+                upstream ? 'bg-ok/10 text-ok ring-ok/30' : 'bg-ink-900 text-ink-400 ring-ink-700',
               )}>
-                <span className={cx('size-1.5 rounded-full', liveReady ? 'animate-pulse-dot bg-ok' : 'bg-ink-500')} />
-                {liveReady ? 'Live' : 'Sandbox'}
+                <span className={cx('size-1.5 rounded-full', upstream ? 'animate-pulse-dot bg-ok' : 'bg-ink-500')} />
+                {upstream ? 'Live upstream' : 'MADOVA engine'}
               </span>
             </div>
 
-            <div className="mt-6 space-y-5">
-              <Field
-                label={`${API_KEY_HEADER} value`}
-                hint="Stored in this browser only. In production, proxy the key server-side so it never reaches a client."
-              >
-                <div className="flex gap-2">
-                  <Input
-                    type="password"
-                    value={keyInput}
-                    onChange={(e) => setKeyInput(e.target.value)}
-                    placeholder="mdv_live_…"
-                    className="font-mono"
-                  />
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      update({ apiKey: keyInput.trim() })
-                      toast(keyInput.trim() ? 'API key saved to this browser.' : 'API key cleared.', 'ok')
-                    }}
-                  >
-                    Save
-                  </Button>
-                </div>
-              </Field>
-
-              <div className="flex items-center justify-between gap-4 rounded-lg bg-ink-950/60 p-4 ring-1 ring-inset ring-ink-800">
-                <div>
-                  <p className="text-[0.85rem] font-medium text-ink-100">Send calls to the live API</p>
-                  <p className="mt-0.5 text-[0.76rem] text-ink-400">
-                    {settings.apiKey
-                      ? 'Requests route through the /upstream dev proxy.'
-                      : 'Add a key first — live mode needs one.'}
-                  </p>
-                </div>
-                <Toggle
-                  checked={settings.live}
-                  onChange={(v) => {
-                    if (v && !settings.apiKey) {
-                      toast('Save an API key before switching to live mode.', 'danger')
-                      return
-                    }
-                    update({ live: v })
-                    toast(v ? 'Live mode on.' : 'Back to the sandbox fleet.', 'ok')
-                  }}
-                  label="Live mode"
-                />
+            <div className="mt-6 space-y-4">
+              <div className="rounded-lg bg-ink-950/60 p-4 ring-1 ring-inset ring-ink-800">
+                <p className="text-[0.85rem] font-medium text-ink-100">
+                  {upstream ? 'Forwarding to the upstream API' : 'Served by this server'}
+                </p>
+                <p className="mt-1.5 text-[0.8rem] leading-relaxed text-ink-400">
+                  {upstream
+                    ? <>Calls are forwarded to <code className="font-mono text-ink-300">{API_BASE_URL}</code> with the
+                       account key, serialised to respect the 1 QPS per-endpoint limit.</>
+                    : <>No upstream key is configured, so the server answers from its own device engine.
+                       Everything you do here is real and persists — it just is not talking to the
+                       upstream fleet. Set <code className="font-mono text-ink-300">MADOVA_UPSTREAM_KEY</code> on
+                       the server to forward instead.</>}
+                </p>
               </div>
 
-              <Field label="Lang header" hint="Sets the language of human-readable messages in responses.">
+              <Field label="Lang header" hint="Sets the language of human-readable messages in API responses.">
                 <Select
-                  value={settings.lang}
-                  onChange={(e) => update({ lang: e.target.value as Lang })}
+                  value={lang}
+                  onChange={(e) => {
+                    const next = e.target.value as Lang
+                    setLangState(next)
+                    setLang(next)
+                    toast(`Lang header set to ${next}.`, 'ok')
+                  }}
                   className="sm:!w-48"
                 >
                   <option value="en">en — English</option>
@@ -210,7 +179,7 @@ export function ApiKeys() {
             </p>
             <Code>{`curl -X POST ${API_BASE_URL}/api/v1/cloudPhone/list \\
   -H "Content-Type: application/json" \\
-  -H "Lang: ${settings.lang}" \\
+  -H "Lang: ${lang}" \\
   -H "${API_KEY_HEADER}: $MADOVA_KEY" \\
   -d '{"page":1,"pagesize":10}'`}</Code>
             <div className="mt-3 flex items-center justify-between">
@@ -251,8 +220,6 @@ export function ApiKeys() {
                       <span>{entry.at}</span>
                       <span>·</span>
                       <span>{entry.ms} ms</span>
-                      <span>·</span>
-                      <span className={entry.live ? 'text-brand-300' : ''}>{entry.live ? 'live' : 'sandbox'}</span>
                     </div>
                   </li>
                 ))}

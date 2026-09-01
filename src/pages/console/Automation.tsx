@@ -4,7 +4,7 @@ import { Icon } from '@/components/Icon'
 import {
   Badge, Button, Card, Dot, Field, Input, Modal, Select, Textarea, cx, useToast,
 } from '@/components/ui'
-import { AUTOMATIONS, GROUPS } from '@/lib/duoplus/mock'
+import { AUTOMATIONS, GROUPS } from '@/data/demo'
 import type { AutomationTask } from '@/lib/duoplus/types'
 
 const STATUS_TONE: Record<AutomationTask['status'], 'ok' | 'brand' | 'neutral' | 'danger'> = {

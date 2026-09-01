@@ -5,7 +5,7 @@ import {
   Button, Card, Field, Modal, Select, Skeleton, useToast,
 } from '@/components/ui'
 import { callData } from '@/lib/duoplus/client'
-import { DRIVE_FILES, GROUPS } from '@/lib/duoplus/mock'
+import { DRIVE_FILES, GROUPS } from '@/data/demo'
 import type { InstalledApp, Paged } from '@/lib/duoplus/types'
 
 export function Apps() {

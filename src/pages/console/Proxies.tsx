@@ -5,12 +5,13 @@ import {
   Button, Card, Dot, Field, Input, Modal, Select, Skeleton, cx, useToast,
 } from '@/components/ui'
 import { callData } from '@/lib/duoplus/client'
-import { PHONES } from '@/lib/duoplus/mock'
+import { useAllPhones } from '@/lib/hooks'
 import type { Paged, Proxy } from '@/lib/duoplus/types'
 
 export function Proxies() {
   const toast = useToast()
   const [proxies, setProxies] = useState<Proxy[] | null>(null)
+  const { phones } = useAllPhones()
   const [open, setOpen] = useState(false)
   const [checking, setChecking] = useState<string | null>(null)
 
@@ -20,7 +21,7 @@ export function Proxies() {
       .catch(() => setProxies([]))
   }, [])
 
-  const boundCount = (id: string) => PHONES.filter((p) => p.proxy_id === id).length
+  const boundCount = (id: string) => (phones ?? []).filter((p) => p.proxy_id === id).length
   const healthy = proxies?.filter((p) => p.healthy).length ?? 0
 
   const check = (id: string) => {
@@ -51,7 +52,7 @@ export function Proxies() {
         {[
           ['Total proxies', String(proxies?.length ?? '—'), 'route', 'brand'],
           ['Healthy', `${healthy} / ${proxies?.length ?? 0}`, 'check', healthy === proxies?.length ? 'ok' : 'warn'],
-          ['Phones bound', String(PHONES.filter((p) => p.proxy_id).length), 'phone', 'brand'],
+          ['Phones bound', String((phones ?? []).filter((p) => p.proxy_id).length), 'phone', 'brand'],
         ].map(([label, value, icon, tone]) => (
           <Card key={label} className="flex items-center gap-4 p-5">
             <span className={cx(

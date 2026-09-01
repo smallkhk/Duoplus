@@ -2,7 +2,8 @@ import { PageHeader } from '@/components/ConsoleLayout'
 import { AreaChart } from '@/components/Charts'
 import { Icon } from '@/components/Icon'
 import { Badge, Button, Card, cx, useToast } from '@/components/ui'
-import { PHONES, USAGE_30D } from '@/lib/duoplus/mock'
+import { USAGE_30D } from '@/data/demo'
+import { useAllPhones } from '@/lib/hooks'
 
 const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 })
 const num = (n: number) => n.toLocaleString('en-US')
@@ -16,10 +17,12 @@ const INVOICES = [
 
 export function Billing() {
   const toast = useToast()
+  const { phones } = useAllPhones()
+  const deviceCount = phones?.length ?? 0
 
   const minutes = USAGE_30D.reduce((s, d) => s + d.minutes, 0)
   const runtimeCost = minutes * 0.0042
-  const deviceCost = PHONES.length * 0.34
+  const deviceCost = deviceCount * 0.34
   const storageCost = 0
   const total = runtimeCost + deviceCost + storageCost
 
@@ -55,7 +58,7 @@ export function Billing() {
 
             <dl className="mt-7 space-y-3.5 border-t border-ink-800 pt-6">
               {[
-                ['Devices', `${PHONES.length} phones × $0.340`, deviceCost],
+                ['Devices', `${deviceCount} phones × $0.340`, deviceCost],
                 ['Startup minutes', `${num(minutes)} min × $0.0042`, runtimeCost],
                 ['Cloud drive storage', '4.8 GB of 20 GB included', storageCost],
               ].map(([label, sub, amount]) => (

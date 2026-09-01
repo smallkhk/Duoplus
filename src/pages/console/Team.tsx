@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { PageHeader } from '@/components/ConsoleLayout'
 import { Icon } from '@/components/Icon'
 import { Badge, Button, Card, Field, Input, Modal, Select, useToast } from '@/components/ui'
-import { TEAM } from '@/lib/duoplus/mock'
+import { TEAM } from '@/data/demo'
 import type { TeamMember } from '@/lib/duoplus/types'
 
 const ROLE_TONE: Record<TeamMember['role'], 'brand' | 'accent' | 'neutral'> = {

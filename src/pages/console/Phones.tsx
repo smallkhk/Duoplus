@@ -7,7 +7,8 @@ import {
   Select, Skeleton, cx, useToast,
 } from '@/components/ui'
 import { callData } from '@/lib/duoplus/client'
-import { GROUPS, PROXIES, REGION_INDEX } from '@/lib/duoplus/mock'
+import { GROUPS, REGION_INDEX } from '@/data/demo'
+import { useProxies } from '@/lib/hooks'
 import {
   PHONE_STATUS_LABEL, PhoneStatus, START_PHONE_TYPE_LABEL,
   type AdbCommandResult, type BatchResult, type CloudPhone, type CloudPhoneListRequest, type Paged,
@@ -423,6 +424,7 @@ function PhoneDrawer({
   phone, onClose, onChanged,
 }: { phone: CloudPhone | null; onClose: () => void; onChanged: () => void }) {
   const toast = useToast()
+  const proxies = useProxies()
   const [tab, setTab] = useState<DrawerTab>('overview')
   const [busy, setBusy] = useState(false)
 
@@ -453,7 +455,7 @@ function PhoneDrawer({
   }
 
   const region = REGION_INDEX[phone.region]
-  const proxy = PROXIES.find((p) => p.id === phone.proxy_id)
+  const proxy = (proxies ?? []).find((p) => p.id === phone.proxy_id)
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
