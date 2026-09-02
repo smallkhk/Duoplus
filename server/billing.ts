@@ -65,7 +65,8 @@ export interface Quote {
 }
 
 export function quote(input: DeviceQuoteInput): Quote {
-  const quantity = Math.max(1, Math.min(500, Math.floor(input.quantity || 1)))
+  /* Quantity 0 is a minutes-only order — topping up runtime without buying devices. */
+  const quantity = Math.max(0, Math.min(500, Math.floor(input.quantity ?? 1)))
   const days = DURATIONS.includes(input.duration_days) ? input.duration_days : 30
   const months = days / 30
 
@@ -73,13 +74,17 @@ export function quote(input: DeviceQuoteInput): Quote {
   const listPer = Math.round(DEVICE_LIST_CENTS * months)
   const netPer = Math.round(listPer * (1 - tier.off))
 
-  const lines: OrderLine[] = [{
-    kind: 'device',
-    description: `${quantity} × cloud phone · ${days} days · ${REGION_INDEX[input.region]?.area ?? input.region}`,
-    quantity,
-    unit_cents: netPer,
-    total_cents: netPer * quantity,
-  }]
+  const lines: OrderLine[] = []
+
+  if (quantity > 0) {
+    lines.push({
+      kind: 'device',
+      description: `${quantity} × cloud phone · ${days} days · ${REGION_INDEX[input.region]?.area ?? input.region}`,
+      quantity,
+      unit_cents: netPer,
+      total_cents: netPer * quantity,
+    })
+  }
 
   if (input.minutes && input.minutes > 0) {
     const rate = minuteRateCents(input.minutes)
@@ -92,7 +97,8 @@ export function quote(input: DeviceQuoteInput): Quote {
     })
   }
 
-  const listTotal = listPer * quantity + (lines[1]?.total_cents ?? 0)
+  const minutesTotal = lines.find((l) => l.kind === 'minutes')?.total_cents ?? 0
+  const listTotal = listPer * quantity + minutesTotal
   const total = lines.reduce((s, l) => s + l.total_cents, 0)
 
   return {
@@ -163,6 +169,7 @@ export function createOrder(
 ): Order {
   const q = quote(input)
   const region = REGION_INDEX[input.region] ? input.region : REGIONS[0].region
+  const quantity = Math.max(0, Math.min(500, Math.floor(input.quantity ?? 1)))
   const order: Order = {
     id: prefixedId('ord'),
     user_id: user.id,
@@ -171,13 +178,13 @@ export function createOrder(
     subtotal_cents: q.subtotal_cents,
     discount_cents: q.discount_cents,
     total_cents: q.total_cents,
-    provision: {
-      quantity: Math.max(1, Math.min(500, Math.floor(input.quantity || 1))),
+    provision: quantity > 0 ? {
+      quantity,
       region,
       os: input.os ?? 'Android 13',
       duration_days: DURATIONS.includes(input.duration_days) ? input.duration_days : 30,
       group_name: input.group_name,
-    },
+    } : undefined,
     minutes: input.minutes && input.minutes > 0 ? input.minutes : undefined,
     created_at: nowIso(),
     created_by: createdBy,

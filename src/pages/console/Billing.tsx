@@ -1,185 +1,306 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { PageHeader } from '@/components/ConsoleLayout'
-import { AreaChart } from '@/components/Charts'
+import { CryptoCheckout } from '@/components/CryptoCheckout'
 import { Icon } from '@/components/Icon'
-import { Badge, Button, Card, cx, useToast } from '@/components/ui'
-import { USAGE_30D } from '@/data/demo'
+import {
+  Badge, Button, Card, EmptyState, Field, Select, Skeleton, cx, useToast,
+} from '@/components/ui'
+import { api, ApiError, type Order } from '@/lib/api'
+import { accountChanged, useAuth } from '@/lib/auth'
 import { useAllPhones } from '@/lib/hooks'
 
-const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 })
+const money = (cents: number) =>
+  (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 })
 const num = (n: number) => n.toLocaleString('en-US')
 
-const INVOICES = [
-  { id: 'MDV-2026-0041882', period: 'August 2026', amount: 4_812.44, status: 'paid', due: '2026-09-01' },
-  { id: 'MDV-2026-0039114', period: 'July 2026', amount: 4_398.10, status: 'paid', due: '2026-08-01' },
-  { id: 'MDV-2026-0036502', period: 'June 2026', amount: 4_105.77, status: 'paid', due: '2026-07-01' },
-  { id: 'MDV-2026-0033988', period: 'May 2026', amount: 3_744.20, status: 'paid', due: '2026-06-01' },
-]
+/** Prepaid minute packages, priced to match the server's rate ladder. */
+const MINUTE_PACKS = [5_000, 20_000, 100_000, 500_000, 1_000_000]
 
 export function Billing() {
   const toast = useToast()
+  const { account, user, meta, refresh } = useAuth()
   const { phones } = useAllPhones()
-  const deviceCount = phones?.length ?? 0
 
-  const minutes = USAGE_30D.reduce((s, d) => s + d.minutes, 0)
-  const runtimeCost = minutes * 0.0042
-  const deviceCost = deviceCount * 0.34
-  const storageCost = 0
-  const total = runtimeCost + deviceCost + storageCost
+  const [orders, setOrders] = useState<Order[] | null>(null)
+  const [pack, setPack] = useState(20_000)
+  const [packQuote, setPackQuote] = useState<number | null>(null)
+  const [paying, setPaying] = useState<Order | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const chains = meta?.payments.chains ?? []
+  const cryptoAvailable = chains.length > 0
+
+  const loadOrders = useCallback(() => {
+    api.orders().then((d) => setOrders(d.orders)).catch(() => setOrders([]))
+  }, [])
+
+  useEffect(() => { loadOrders() }, [loadOrders])
+
+  /* Price the selected package server-side so the ladder is never duplicated here. */
+  useEffect(() => {
+    let cancelled = false
+    api.quote({ quantity: 0, duration_days: 30, region: 'us-west', minutes: pack })
+      .then((q) => { if (!cancelled) setPackQuote(q.total_cents) })
+      .catch(() => { if (!cancelled) setPackQuote(null) })
+    return () => { cancelled = true }
+  }, [pack])
+
+  const paid = useMemo(() => (orders ?? []).filter((o) => o.status === 'paid'), [orders])
+  const pending = useMemo(() => (orders ?? []).filter((o) => o.status === 'pending'), [orders])
+
+  const deviceCount = phones?.length ?? 0
+  const spend = account?.spend_cents ?? 0
+
+  const topUp = async () => {
+    setBusy(true)
+    try {
+      const { order } = await api.createOrder({
+        quantity: 0, duration_days: 30, region: 'us-west', minutes: pack,
+      })
+      loadOrders()
+      if (cryptoAvailable) {
+        setPaying(order)
+      } else {
+        await api.payOrder(order.id)
+        toast(`${num(pack)} minutes added.`, 'ok')
+        loadOrders()
+        accountChanged()
+        await refresh()
+      }
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not start the top-up.', 'danger')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <>
       <PageHeader
         title="Billing"
-        lead="Two meters: the devices you hold, and the minutes they spend powered on. This period runs to the end of the month."
+        lead="What you hold, what you have spent, and how to add runtime. Everything here is your account — no sample data."
         actions={
-          <>
-            <Button variant="secondary" size="sm" icon="wallet"
-              onClick={() => toast('Payment methods are not wired up in this demo build.', 'info')}>
-              Payment method
-            </Button>
-            <Button size="sm" icon="bolt" onClick={() => toast('Upgrades are not wired up in this demo build.', 'info')}>
-              Upgrade plan
-            </Button>
-          </>
+          <Link
+            to="/console/store"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand-500 px-3 text-[0.8rem] font-medium text-white transition-colors hover:bg-brand-400"
+          >
+            <Icon name="plus" className="size-4" />
+            Buy devices
+          </Link>
         }
       />
 
+      {paying && (
+        <div className="mb-4">
+          <CryptoCheckout
+            order={paying}
+            chains={chains}
+            onSettled={() => { setPaying(null); loadOrders() }}
+            onCancel={() => {
+              void api.cancelOrder(paying.id).catch(() => {})
+              setPaying(null)
+              loadOrders()
+            }}
+          />
+        </div>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-[1fr_22rem] [&>*]:min-w-0">
         <div className="space-y-4">
-          <Card className="p-6">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <p className="text-[0.78rem] text-ink-400">Current period · 1–30 September 2026</p>
-                <p className="mt-2 font-mono text-4xl font-semibold tracking-tight text-ink-50">{money(total)}</p>
-                <p className="mt-1.5 text-[0.8rem] text-ink-400">Estimated, updated hourly.</p>
-              </div>
-              <Badge tone="brand">Volume tier: 200–999 · 80% off</Badge>
-            </div>
-
-            <dl className="mt-7 space-y-3.5 border-t border-ink-800 pt-6">
-              {[
-                ['Devices', `${deviceCount} phones × $0.340`, deviceCost],
-                ['Startup minutes', `${num(minutes)} min × $0.0042`, runtimeCost],
-                ['Cloud drive storage', '4.8 GB of 20 GB included', storageCost],
-              ].map(([label, sub, amount]) => (
-                <div key={label as string} className="flex items-start justify-between gap-4">
-                  <dt>
-                    <span className="block text-[0.85rem] text-ink-200">{label as string}</span>
-                    <span className="mt-0.5 block font-mono text-[0.72rem] text-ink-500">{sub as string}</span>
-                  </dt>
-                  <dd className="font-mono text-[0.9rem] text-ink-50">{money(amount as number)}</dd>
+          <div className="grid gap-4 sm:grid-cols-3">
+            {[
+              ['Devices held', phones === null ? null : num(deviceCount), 'phone', 'billed monthly'],
+              ['Prepaid minutes', account ? num(account.minutes_balance) : null, 'clock', 'never expire'],
+              ['Total spent', account ? money(spend) : null, 'wallet', `${paid.length} paid order${paid.length === 1 ? '' : 's'}`],
+            ].map(([label, value, icon, foot]) => (
+              <Card key={label as string} className="p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-[0.78rem] text-ink-400">{label as string}</span>
+                  <span className="grid size-8 place-items-center rounded-lg bg-ink-800 text-brand-300">
+                    <Icon name={icon as string} className="size-4" />
+                  </span>
                 </div>
-              ))}
-            </dl>
-          </Card>
+                {value === null
+                  ? <Skeleton className="mt-3 h-8 w-24" />
+                  : <p className="mt-3 font-mono text-2xl font-semibold tracking-tight text-ink-50">{value as string}</p>}
+                <p className="mt-3 border-t border-ink-800 pt-3 text-[0.72rem] text-ink-500">{foot as string}</p>
+              </Card>
+            ))}
+          </div>
 
-          <Card className="p-6">
-            <div className="mb-5">
-              <h2 className="text-[0.95rem] font-semibold text-ink-50">Runtime consumption</h2>
-              <p className="mt-1 text-[0.78rem] text-ink-400">Startup minutes per day, this period.</p>
-            </div>
-            <AreaChart
-              data={USAGE_30D.map((d) => ({ label: d.label, value: d.minutes }))}
-              valueFormat={(n) => `${num(n)} min`}
-              label="minutes"
-              height={180}
-            />
-          </Card>
+          {pending.length > 0 && (
+            <Card className="border-warn/40 bg-warn/[0.04] p-5">
+              <div className="flex items-center gap-2.5">
+                <Icon name="alert" className="size-4 shrink-0 text-warn" />
+                <h2 className="text-[0.92rem] font-semibold text-ink-50">
+                  {pending.length} unpaid order{pending.length === 1 ? '' : 's'}
+                </h2>
+              </div>
+              <ul className="mt-4 space-y-2.5">
+                {pending.map((o) => (
+                  <li key={o.id} className="flex flex-wrap items-center gap-3 rounded-lg bg-ink-950/60 p-3.5 ring-1 ring-inset ring-ink-800">
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[0.85rem] text-ink-100">
+                        {o.lines.map((l) => l.description).join(' · ')}
+                      </span>
+                      <span className="mt-0.5 block font-mono text-[0.7rem] text-ink-500">{o.created_at}</span>
+                    </span>
+                    <span className="font-mono text-[0.95rem] font-semibold text-ink-50">{money(o.total_cents)}</span>
+                    <Button size="sm" onClick={() => setPaying(o)}>Pay</Button>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
 
           <Card className="overflow-hidden">
             <div className="border-b border-ink-800 px-6 py-4">
-              <h2 className="text-[0.95rem] font-semibold text-ink-50">Invoices</h2>
+              <h2 className="text-[0.95rem] font-semibold text-ink-50">Payment history</h2>
+              <p className="mt-1 text-[0.78rem] text-ink-400">
+                Every settled order, with its on-chain transaction where one exists.
+              </p>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[38rem] border-collapse text-left text-[0.82rem]">
-                <thead>
-                  <tr className="border-b border-ink-800 text-[0.7rem] uppercase tracking-wider text-ink-500">
-                    <th className="px-6 py-3 font-medium">Invoice</th>
-                    <th className="px-6 py-3 font-medium">Period</th>
-                    <th className="px-6 py-3 font-medium">Amount</th>
-                    <th className="px-6 py-3 font-medium">Status</th>
-                    <th className="px-6 py-3 font-medium"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink-800">
-                  {INVOICES.map((inv) => (
-                    <tr key={inv.id} className="transition-colors hover:bg-ink-800/40">
-                      <td className="px-6 py-3.5"><code className="font-mono text-[0.76rem] text-ink-200">{inv.id}</code></td>
-                      <td className="px-6 py-3.5 text-ink-300">{inv.period}</td>
-                      <td className="px-6 py-3.5 font-mono text-ink-100">{money(inv.amount)}</td>
-                      <td className="px-6 py-3.5"><Badge tone="ok">{inv.status}</Badge></td>
-                      <td className="px-6 py-3.5">
-                        <div className="flex justify-end">
-                          <Button
-                            size="sm" variant="ghost" icon="download"
-                            onClick={() => toast('Invoice PDFs are not generated in this demo build.', 'info')}
-                          >
-                            PDF
-                          </Button>
-                        </div>
-                      </td>
+            {orders === null ? (
+              <div className="space-y-3 p-6">
+                {Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+              </div>
+            ) : paid.length === 0 ? (
+              <EmptyState
+                icon="wallet"
+                title="No payments yet"
+                body="Orders appear here once they settle, each linked to the transaction that paid for it."
+              />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[44rem] border-collapse text-left text-[0.82rem]">
+                  <thead>
+                    <tr className="border-b border-ink-800 text-[0.7rem] uppercase tracking-wider text-ink-500">
+                      <th className="px-6 py-3 font-medium">Order</th>
+                      <th className="px-6 py-3 font-medium">Items</th>
+                      <th className="px-6 py-3 font-medium">Paid</th>
+                      <th className="px-6 py-3 font-medium">Amount</th>
+                      <th className="px-6 py-3 font-medium">Transaction</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-ink-800">
+                    {paid.map((o) => (
+                      <tr key={o.id} className="transition-colors hover:bg-ink-800/40">
+                        <td className="px-6 py-3.5">
+                          <code className="font-mono text-[0.72rem] text-ink-300">{o.id}</code>
+                        </td>
+                        <td className="px-6 py-3.5 text-ink-200">
+                          {o.lines.map((l) => l.description).join(' · ')}
+                        </td>
+                        <td className="px-6 py-3.5 font-mono text-[0.74rem] text-ink-500">
+                          {(o.paid_at ?? o.created_at).slice(0, 16)}
+                        </td>
+                        <td className="px-6 py-3.5 font-mono text-ink-50">{money(o.total_cents)}</td>
+                        <td className="px-6 py-3.5">
+                          {o.payment?.explorer_url ? (
+                            <a
+                              href={o.payment.explorer_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1.5 text-[0.76rem] text-brand-300 hover:text-brand-200"
+                            >
+                              {o.payment.chain === 'bsc' ? 'BscScan' : 'Tronscan'}
+                              <Icon name="external" className="size-3.5" />
+                            </a>
+                          ) : (
+                            <span className="text-[0.74rem] text-ink-600">account credit</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </Card>
         </div>
 
         <div className="space-y-4">
           <Card className="p-6">
-            <h2 className="text-[0.9rem] font-semibold text-ink-50">Plan</h2>
-            <p className="mt-4 flex items-baseline gap-2">
-              <span className="font-mono text-2xl font-semibold text-ink-50">Scale</span>
-              <Badge tone="brand">Partner</Badge>
+            <h2 className="text-[0.9rem] font-semibold text-ink-50">Top up runtime</h2>
+            <p className="mt-1.5 text-[0.78rem] leading-relaxed text-ink-400">
+              Minutes are only spent while a device is powered on, and never expire.
             </p>
-            <ul className="mt-5 space-y-2.5 border-t border-ink-800 pt-5">
-              {[
-                'Wholesale rates — 30% off list',
-                'Unlimited sub-accounts',
-                'Net 30 payment terms',
-                'Named partner manager',
-              ].map((p) => (
-                <li key={p} className="flex gap-2.5">
-                  <Icon name="check" className="mt-0.5 size-3.5 shrink-0 text-ok" strokeWidth={2.6} />
-                  <span className="text-[0.8rem] leading-snug text-ink-300">{p}</span>
-                </li>
-              ))}
-            </ul>
-          </Card>
-
-          <Card className="p-6">
-            <h2 className="text-[0.9rem] font-semibold text-ink-50">Prepaid minutes</h2>
-            <p className="mt-4 font-mono text-2xl font-semibold text-ink-50">{num(412_800)}</p>
-            <p className="mt-1 text-[0.76rem] text-ink-400">minutes remaining · never expire</p>
-            <div className="mt-4 h-2 overflow-hidden rounded-full bg-ink-800">
-              <div className="h-full w-[41%] rounded-full bg-gradient-to-r from-brand-500 to-accent-400" />
-            </div>
-            <p className="mt-3 text-[0.74rem] text-ink-500">
-              At the current burn rate this lasts about 18 days.
+            <Field className="mt-5" label="Package">
+              <Select value={pack} onChange={(e) => setPack(Number(e.target.value))}>
+                {MINUTE_PACKS.map((m) => (
+                  <option key={m} value={m}>{num(m)} minutes</option>
+                ))}
+              </Select>
+            </Field>
+            <p className="mt-4 flex items-baseline justify-between">
+              <span className="text-[0.8rem] text-ink-400">Price</span>
+              {packQuote === null
+                ? <Skeleton className="h-6 w-20" />
+                : <span className="font-mono text-xl font-semibold text-ink-50">{money(packQuote)}</span>}
             </p>
             <Button
-              className="mt-5 w-full" variant="secondary" icon="plus"
-              onClick={() => toast('Top-ups are not wired up in this demo build.', 'info')}
+              className="mt-5 w-full"
+              disabled={busy || packQuote === null}
+              onClick={() => void topUp()}
+              icon={busy ? undefined : 'plus'}
             >
-              Top up minutes
+              {busy ? 'Preparing…' : 'Buy minutes'}
             </Button>
           </Card>
 
-          <Card className={cx('p-6')}>
-            <h2 className="text-[0.9rem] font-semibold text-ink-50">Payment method</h2>
-            <div className="mt-4 flex items-center gap-3 rounded-lg bg-ink-950/60 p-4 ring-1 ring-inset ring-ink-800">
-              <span className="grid size-9 place-items-center rounded-lg bg-ink-800 text-ink-300">
-                <Icon name="wallet" className="size-4" />
+          <Card className="p-6">
+            <h2 className="text-[0.9rem] font-semibold text-ink-50">How you pay</h2>
+            {cryptoAvailable ? (
+              <>
+                <ul className="mt-4 space-y-2.5">
+                  {chains.map((c) => (
+                    <li key={c.id} className="flex items-center gap-3 rounded-lg bg-ink-950/60 p-3 ring-1 ring-inset ring-ink-800">
+                      <span className={cx(
+                        'grid size-8 shrink-0 place-items-center rounded-lg font-mono text-[0.62rem] font-bold',
+                        c.id === 'bsc' ? 'bg-[#f0b90b]/15 text-[#f0b90b]' : 'bg-[#eb0029]/15 text-[#ff5c72]',
+                      )}>
+                        {c.id === 'bsc' ? 'BNB' : 'TRX'}
+                      </span>
+                      <span>
+                        <span className="block text-[0.82rem] text-ink-100">{c.label}</span>
+                        <span className="block text-[0.7rem] text-ink-500">{c.token} · {c.network}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-4 text-[0.72rem] leading-relaxed text-ink-500">
+                  Nothing is stored on file. Each order generates its own invoice with a unique
+                  amount, and settles as soon as the transfer confirms on-chain.
+                </p>
+              </>
+            ) : (
+              <p className="mt-3 text-[0.8rem] leading-relaxed text-ink-400">
+                No payment network is configured on this server, so orders settle against account
+                credit.
+              </p>
+            )}
+          </Card>
+
+          <Card className="p-6">
+            <h2 className="text-[0.9rem] font-semibold text-ink-50">Plan</h2>
+            <p className="mt-3 flex items-baseline gap-2">
+              <span className="font-mono text-xl font-semibold capitalize text-ink-50">
+                {account?.plan ?? user?.plan ?? 'trial'}
               </span>
-              <span>
-                <span className="block font-mono text-[0.82rem] text-ink-100">•••• •••• •••• 4419</span>
-                <span className="block text-[0.72rem] text-ink-500">Expires 08/2029</span>
-              </span>
-            </div>
-            <p className="mt-4 text-[0.74rem] leading-relaxed text-ink-500">
-              Partner accounts are invoiced net 30; the card on file is a fallback only.
+              <Badge tone="brand">{num(deviceCount)} devices</Badge>
             </p>
+            <p className="mt-3 text-[0.75rem] leading-relaxed text-ink-500">
+              Your tier follows the size of your fleet — device pricing steps down automatically as
+              it grows, with nothing to renegotiate.
+            </p>
+            <Link
+              to="/pricing"
+              className="mt-4 inline-flex items-center gap-1.5 text-[0.8rem] font-medium text-brand-300 hover:text-brand-200"
+            >
+              See the volume tiers
+              <Icon name="arrowRight" className="size-3.5" />
+            </Link>
           </Card>
         </div>
       </div>

@@ -29,8 +29,11 @@ export interface ChainSpec {
   decimals: number
   addressEnv: string
   explorerTx: (hash: string) => string
-  /** Wallet deep-link so a phone can scan and prefill. */
-  paymentUri: (address: string, amount: string, contract: string) => string
+  /**
+   * Wallet deep-link so a phone can scan and prefill. `units` is the amount in
+   * the token's smallest unit — EIP-681 wants an integer there, never a decimal.
+   */
+  paymentUri: (address: string, units: string, contract: string) => string
 }
 
 export const CHAINS: Record<ChainId, ChainSpec> = {
@@ -44,8 +47,10 @@ export const CHAINS: Record<ChainId, ChainSpec> = {
     decimals: Number(process.env.MADOVA_BSC_USDT_DECIMALS ?? 18),
     addressEnv: 'MADOVA_BSC_ADDRESS',
     explorerTx: (h) => `https://bscscan.com/tx/${h}`,
-    paymentUri: (address, amount, contract) =>
-      `ethereum:${contract}@56/transfer?address=${address}&uint256=${amount}`,
+    /* EIP-681: uint256 is the raw token amount. A decimal here makes wallets
+       send dust (or reject the link), so the base-unit integer is passed. */
+    paymentUri: (address, units, contract) =>
+      `ethereum:${contract}@56/transfer?address=${address}&uint256=${units}`,
   },
   tron: {
     id: 'tron',
@@ -56,7 +61,11 @@ export const CHAINS: Record<ChainId, ChainSpec> = {
     decimals: Number(process.env.MADOVA_TRON_USDT_DECIMALS ?? 6),
     addressEnv: 'MADOVA_TRON_ADDRESS',
     explorerTx: (h) => `https://tronscan.org/#/transaction/${h}`,
-    paymentUri: (address, amount) => `tron:${address}?amount=${amount}`,
+    /* Tron has no deep-link standard that reliably carries a TRC-20 contract:
+       wallets that ignore a `token` parameter read `amount` as TRX and would
+       send the wrong asset. The bare address is what every Tron wallet scans
+       correctly; the checkout screen carries the exact USDT amount. */
+    paymentUri: (address) => address,
   },
 }
 
@@ -175,7 +184,7 @@ export async function createIntent(order: Order, chain: ChainId): Promise<Paymen
   const amount = allocateAmount(chain, order.total_cents)
   const units = toUnits(amount, spec.decimals).toString()
   const now = Date.now()
-  const uri = spec.paymentUri(address, amount, spec.contract)
+  const uri = spec.paymentUri(address, units, spec.contract)
 
   return {
     chain,

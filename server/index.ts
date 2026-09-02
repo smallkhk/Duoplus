@@ -127,9 +127,17 @@ app.post('/api/cloud', requireAuth, async (req, res) => {
 
 /* -------------------------------- billing ------------------------------- */
 
+/* `quantity` is optional and 0 is meaningful (a minutes-only top-up), so a
+   plain `|| 1` fallback would silently turn a top-up into a device purchase. */
+function readQuantity(raw: unknown): number {
+  if (raw === undefined || raw === null || raw === '') return 1
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : 1
+}
+
 app.post('/api/quote', requireAuth, (req, res) => {
   res.json(envelope(quote({
-    quantity: Number(req.body?.quantity) || 1,
+    quantity: readQuantity(req.body?.quantity),
     duration_days: Number(req.body?.duration_days) || 30,
     region: String(req.body?.region ?? 'us-west'),
     minutes: req.body?.minutes ? Number(req.body.minutes) : undefined,
@@ -142,15 +150,19 @@ app.get('/api/orders', requireAuth, (req, res) => {
 })
 
 app.post('/api/orders', requireAuth, (req, res) => {
-  const order = createOrder(req.user!, {
-    quantity: Number(req.body?.quantity) || 1,
+  const input = {
+    quantity: readQuantity(req.body?.quantity),
     duration_days: Number(req.body?.duration_days) || 30,
     region: String(req.body?.region ?? 'us-west'),
     os: req.body?.os ? String(req.body.os) : undefined,
     minutes: req.body?.minutes ? Number(req.body.minutes) : undefined,
     group_name: req.body?.group_name ? String(req.body.group_name) : undefined,
-  }, 'user')
-  res.json(envelope({ order }))
+  }
+  /* Neither devices nor minutes means there is nothing to charge for. */
+  if (Math.floor(input.quantity) < 1 && !input.minutes) {
+    return errorOut(res, 400, 'Choose at least one device or a minute package.')
+  }
+  res.json(envelope({ order: createOrder(req.user!, input, 'user') }))
 })
 
 app.get('/api/orders/:id', requireAuth, (req, res) => {
