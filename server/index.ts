@@ -30,7 +30,9 @@ import {
 } from './assistant.js'
 import { resourceRoutes } from './routes-resources.js'
 import { describeSettings, setting, updateSettings } from './settings.js'
-import { health, isAdmin, providerOptions, testAssistant, testChain, testUpstream } from './admin.js'
+import {
+  adminUser, health, isAdmin, providerOptions, testAssistant, testChain, testUpstream,
+} from './admin.js'
 import {
   API_SCOPES, InputError, acceptInvite, consumeResetToken, createApiKey, findInvite,
   issueResetToken, keysOf, revokeApiKey, userForApiKey,
@@ -595,6 +597,10 @@ app.listen(PORT, () => {
   console.log(`  static files : ${distDir}`)
   console.log(`  env file     : ${envFile.loaded ? `${envFile.path} (${envFile.count} applied)` : 'none — using the process environment'}`)
   console.log(`  cloud phones : ${upstreamConfigured() ? 'live upstream' : 'local engine'}`)
+  const admin = adminUser()
+  console.log(`  admin        : ${admin
+    ? `${admin.email}${process.env.MADOVA_ADMIN_EMAIL ? ' (set by MADOVA_ADMIN_EMAIL)' : ' (oldest account)'}`
+    : 'nobody yet — the first account to register becomes the administrator'}`)
   const enabled = enabledChains()
   console.log(`  payments     : ${enabled.length ? enabled.join(', ') : 'none configured'}`)
   for (const warning of paymentWarnings()) console.warn(`  ⚠  ${warning}`)

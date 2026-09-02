@@ -8,19 +8,25 @@
  * point of this page is to configure a deployment that has no shell.
  */
 import { db, type User } from './store.js'
+import { DEMO_EMAIL } from './seed.js'
 import { chainEnabled, merchantAddress, paymentWarnings, type ChainId } from './crypto.js'
 import { upstreamBase, upstreamConfigured, upstreamKey } from './fleet.js'
 import { PROVIDERS, resolveProvider } from './providers.js'
 import { setting } from './settings.js'
 
-/** The account that administers this deployment, if there is one yet. */
+/**
+ * The account that administers this deployment, if there is one yet.
+ *
+ * MADOVA_ADMIN_EMAIL settles it outright. Failing that it is the oldest real
+ * account: the seeded demo login is skipped, because on a fresh install it is
+ * created before anyone signs up and would otherwise inherit the site.
+ */
 export function adminUser(): User | undefined {
   const named = (process.env.MADOVA_ADMIN_EMAIL ?? '').trim().toLowerCase()
   const users = db().users
   if (named) return users.find((u) => u.email.toLowerCase() === named)
-  /* First account created — the person who set the site up. */
   return [...users]
-    .filter((u) => !u.parent_id)
+    .filter((u) => !u.parent_id && u.email.toLowerCase() !== DEMO_EMAIL)
     .sort((a, b) => a.created_at.localeCompare(b.created_at))[0]
 }
 

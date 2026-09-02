@@ -160,7 +160,11 @@ fail on memory or inodes.
 
 ## Step 4 — Environment variables
 
-Two ways to do this — pick one.
+Only three variables belong here. **Every other key — the cloud phone provider, both payment
+addresses, the assistant, SMTP — is set in the browser** on the Site settings page after you sign
+in. Nothing below needs to be repeated there.
+
+Two ways to set these — pick one.
 
 **From the terminal (SSH):** create a `.env` file in the application root. The server reads it at
 startup, and real environment variables always take precedence, so this never fights with anything
@@ -178,21 +182,17 @@ chmod 600 .env
 
 **From cPanel:** Setup Node.js App, expand your app, and add them under *Environment variables*.
 
-Either way, these are the ones that matter:
-
 | Variable | Value | Why |
 | --- | --- | --- |
 | `MADOVA_SESSION_SECRET` | a long random string | **Required.** Signs session cookies. Without it a new secret is generated on every restart and everyone is signed out. Generate one with `openssl rand -hex 32`. |
-| `NODE_ENV` | `production` | Marks session cookies `Secure`, so they only travel over HTTPS. |
+| `NODE_ENV` | `production` | Marks session cookies `Secure`, so they only travel over HTTPS. Set this only once HTTPS works, or nobody stays signed in. |
 | `MADOVA_DATA_DIR` | `/home/YOURUSER/madova-data` | **Recommended.** Keeps the database outside the repository so a bad deploy or a re-clone cannot delete your accounts and devices. |
 
-Optional, depending on what you want switched on:
+One more is worth setting if more than one person will have an account:
 
-| Variable | Value |
-| --- | --- |
-| `OPENAI_API_KEY` (or `GEMINI_API_KEY`, `GROQ_API_KEY`, …) | Turns the AI assistant on. Without one it runs the basic intent router. |
-| `MADOVA_AI_MODEL` | Pins a model instead of the provider default. |
-| `MADOVA_UPSTREAM_KEY` | Forwards device calls to the live cloud phone API instead of the built-in engine. |
+| Variable | Value | Why |
+| --- | --- | --- |
+| `MADOVA_ADMIN_EMAIL` | the address you sign in with | Names the site administrator outright. Without it the oldest real account gets the role, which is almost always you — but naming it removes the doubt. |
 
 Then restart: press **Restart** in Setup Node.js App, or `touch ~/madova/tmp/restart.txt` over SSH.
 
@@ -293,6 +293,20 @@ cd ~/madova && git pull origin deploy && npm install && mkdir -p tmp && touch tm
 
 `touch tmp/restart.txt` is how Passenger is told to reload — it is equivalent to pressing Restart.
 
+### Back up the database before an update
+
+The data file gains new collections as features are added. Old files are read as-is and the missing
+collections simply come back empty, so an update never rewrites what is already there — but a
+one-line backup costs nothing and is the difference between a bad deploy being an inconvenience and
+being a disaster:
+
+```bash
+cp ~/madova-data/madova.json ~/madova-data/madova.$(date +%F-%H%M).json
+```
+
+(Use `~/madova/data/madova.json` if you did not set `MADOVA_DATA_DIR`.) To roll back, stop the app,
+copy the dated file back over `madova.json`, and restart.
+
 ### If the repository is not in the application directory
 
 If you keep the repository somewhere else (say `~/repositories/madova`) and the app in `~/madova`,
@@ -332,99 +346,93 @@ output across and touches `tmp/restart.txt` for you.
 
 ---
 
-## Going live — leaving demo mode
+## Going live
 
-Demo mode is not one switch. Three of the four items below are configuration; the fourth is code
-you must write before taking money.
+Everything that used to mean editing `.env` and restarting is now a page in the console.
 
-### Config — do these now
+### Step 1 — Sign in and find Site settings
+
+Register your account on the live site. The first real account becomes the site administrator, and
+a **Site settings** entry appears at the bottom of the console sidebar — only you can see it. The
+startup log names whoever holds the role:
+
+```
+admin        : you@your-domain.com (oldest account)
+```
+
+If that line names someone else, set `MADOVA_ADMIN_EMAIL` in `.env` and restart.
+
+### Step 2 — Fill in the page
+
+Site settings opens with **What is working** — a plain list of what a customer can and cannot do on
+your site right now. Work down it. Each section has a **Test** button that really calls the
+provider, the explorer or the model and tells you what came back, so a wrong key is caught here
+rather than by a customer.
+
+| Section | What it turns on |
+| --- | --- |
+| Cloud phone supply | Real handsets instead of the built-in engine. Without a key everything still works, but the devices are simulated. |
+| Payments · BNB Smart Chain | USDT over BEP-20 at checkout. Needs your receiving address; an Etherscan V2 key is free and strongly recommended. |
+| Payments · Tron | USDT over TRC-20. Needs your receiving address; a TronGrid key is optional but the public tier is slow. |
+| Support assistant | A real model behind the chat bubble. Without a key it answers from the knowledge base and can still run device actions. |
+| Site and email | Your public URL (used to build reset and invitation links) and SMTP. Until SMTP is set, those links go to the server log. |
+
+Saved settings apply on the **next request** — no restart. A stored key comes back masked, and
+saving the form without retyping it leaves it alone.
+
+Anything already in your `.env` keeps working: the page falls through to the environment when
+nothing is set here, and each field tells you which it is using.
+
+### Step 3 — Remove the demo account
 
 ```bash
 cd ~/madova
-
-# Real devices: forward to the live cloud phone API instead of the built-in engine
-echo 'MADOVA_UPSTREAM_KEY=your-key-here' >> .env
-
-# Real assistant: any provider — without one it runs the basic intent router
-echo 'OPENAI_API_KEY=sk-...' >> .env
-
-# Secure cookies (do this only once HTTPS works, or nobody stays signed in)
-echo 'NODE_ENV=production' >> .env
-
-# Remove the seeded demo account and its 148 fake devices
+source ~/nodevenv/madova/22/bin/activate
 npm run remove-demo
 echo 'MADOVA_SEED_DEMO=false' >> .env
-
 touch tmp/restart.txt
 ```
 
 Register your own account first — `remove-demo` warns if it would leave the database empty, because
-an empty database is re-seeded on the next start. With a real account present, or with
-`MADOVA_SEED_DEMO=false`, the demo never returns. The script writes a timestamped backup first.
+an empty database is re-seeded on the next start. The script writes a timestamped backup first.
 
-Confirm afterwards: `/api/meta` should report `"upstream": true` and a non-null assistant provider.
+### Taking payment — how it settles
 
-### Taking payment — USDT on BSC and Tron
+**The server never holds a private key.** You give it your own receiving address per chain and it
+only watches the chain, so a compromise of this box loses data, not funds.
 
-Checkout accepts USDT over BEP-20 and TRC-20. **The server never holds a private key**: you give it
-your own receiving address per chain and it only watches the chain, so a compromise of this box
-loses data, not funds.
-
-```bash
-cd ~/madova
-cat >> .env <<'EOF'
-MADOVA_BSC_ADDRESS=0x...your real 42-character BSC address...
-MADOVA_TRON_ADDRESS=T...your real 34-character Tron address...
-MADOVA_BSCSCAN_API_KEY=your-free-bscscan-key
-EOF
-touch tmp/restart.txt
-```
-
-Put your **real** addresses in — a placeholder is checked for shape and rejected, and the server
-logs which variable is wrong and leaves that network switched off rather than showing customers an
-address their money cannot be recovered from. Check the startup log after restarting: it prints
-`payments : bsc, tron` for the networks it accepted.
-
-Setting an address enables that network at checkout; leaving it blank hides it. A free BscScan key
-is strongly recommended — the unauthenticated endpoint is heavily rate limited. TronGrid works
-without a key.
-
-How it settles: each invoice is given a unique amount (a per-order offset in the fourth decimal,
-reserved while the invoice is open), so two customers owing the same price are never confused
-on-chain. The server matches recipient, exact amount and timestamp, refuses a transaction already
-credited to another order, and provisions the moment the transfer is deep enough — 12 confirmations
-on BSC, 60 seconds of age on Tron, both configurable. Provisioning happens server-side on the poll,
-so a customer who closes the tab still gets what they paid for.
+Each invoice is given a unique amount (a per-order offset in the fourth decimal, reserved while the
+invoice is open), so two customers owing the same price are never confused on-chain. The server
+matches recipient, exact amount and timestamp, refuses a transaction already credited to another
+order, and provisions the moment the transfer is deep enough — 12 confirmations on BSC, 60 seconds
+of age on Tron, both adjustable on the page. Provisioning happens server-side on the poll, so a
+customer who closes the tab still gets what they paid for.
 
 Only USDT is auto-confirmed. It is a stablecoin, so a dollar invoice is a token invoice with no
 price oracle involved; quoting native BNB or TRX would need a live rate and a slippage window.
 
-Two things to verify yourself before real money moves: the token contract addresses (the defaults
-are the canonical USDT contracts, but check them), and a small end-to-end payment on each chain.
+Two things to verify yourself before real money moves: the token contract and its decimals (the
+defaults are the canonical USDT values, but check them — they sit next to each other on the page
+because changing one without the other asks customers for the wrong amount), and **one small
+end-to-end payment on each chain**.
+
+### Your own API keys
+
+The public API at `/v1` is yours, not your customers'. Keys are issued at the bottom of Site
+settings, carry only the scopes you grant, and are shown once. Use them to automate your own fleet
+from a script:
+
+```bash
+curl -X POST https://your-domain.com/v1/cloudPhone/list \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $MADOVA_KEY" \
+  -d '{"page":1,"pagesize":10}'
+```
+
+### Before real volume
 
 **Move off the JSON store.** It is fine for a pilot, but two simultaneous writes can lose one.
 `server/store.ts` is the only file that touches storage.
-
-### Console features that are still stubbed
-
-These say so when clicked, rather than pretending to work. They need building if you want them:
-
-| Screen | Not yet wired |
-| --- | --- |
-| API | Create, rotate and revoke keys |
-| Billing | Payment methods, upgrades, invoice PDFs, minute top-ups |
-| Proxies | Add, delete, bulk import |
-| Groups | Create, edit, delete |
-| Cloud drive | Upload, delete |
-| Cloud numbers | Rent, bind |
-| Automation | Create tasks |
-| Team | Invite, edit members |
-| Sub-accounts | Create, CSV export |
-| Settings | Save profile, change password, delete account |
-| Sign-in | Google and GitHub buttons |
-
-Everything else — accounts, sessions, device control, provisioning, orders, the assistant, support
-threads — is real and persists.
 
 ## What shared hosting will and will not do well
 
