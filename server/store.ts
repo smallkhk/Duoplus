@@ -210,6 +210,12 @@ export interface Database {
   members: StoredMember[]
   sub_accounts: Owned<SubAccount>[]
   usage: UsageDay[]
+  /**
+   * Runtime configuration set from the admin page. Takes precedence over the
+   * process environment, so a deployment with no shell can still be configured.
+   */
+  settings?: Record<string, string>
+  settings_updated_at?: string
 }
 
 const EMPTY: Database = {

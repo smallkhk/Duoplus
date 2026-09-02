@@ -92,8 +92,8 @@ export function Solutions() {
           <ButtonLink to="/pricing" size="lg" variant="outline">Price it yourself</ButtonLink>
         </div>
         <p className="mt-6 text-center text-[0.8rem] text-ink-500">
-          Reselling to your own customers?{' '}
-          <Link to="/reseller" className="text-brand-300 hover:text-brand-200">See the partner programme →</Link>
+          Running a large fleet?{' '}
+          <Link to="/pricing" className="text-brand-300 hover:text-brand-200">Pricing drops as it grows →</Link>
         </p>
       </Section>
     </>

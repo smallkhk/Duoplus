@@ -25,10 +25,15 @@ import {
   applyCheck, checkIntent, createIntent, enabledChains, paymentConfig, paymentWarnings,
   type ChainId,
 } from './crypto.js'
-import { assistantConfigured, MODEL, PROVIDER_ID, PROVIDER_LABEL, runAssistant } from './assistant.js'
-import { resourceRoutes } from './routes-resources.js'
 import {
-  InputError, acceptInvite, consumeResetToken, findInvite, issueResetToken, userForApiKey,
+  assistantConfigured, currentModel, currentProviderId, currentProviderLabel, runAssistant,
+} from './assistant.js'
+import { resourceRoutes } from './routes-resources.js'
+import { describeSettings, setting, updateSettings } from './settings.js'
+import { health, isAdmin, providerOptions, testAssistant, testChain, testUpstream } from './admin.js'
+import {
+  API_SCOPES, InputError, acceptInvite, consumeResetToken, createApiKey, findInvite,
+  issueResetToken, keysOf, revokeApiKey, userForApiKey,
 } from './resources.js'
 import { DEMO_EMAIL, grantTrialPhone, seed } from './seed.js'
 import {
@@ -52,14 +57,14 @@ app.get('/api/meta', (_req, res) => {
   res.json(envelope({
     assistant: {
       configured: assistantConfigured(),
-      model: MODEL,
-      provider: PROVIDER_ID,
-      provider_label: PROVIDER_LABEL,
+      model: currentModel(),
+      provider: currentProviderId(),
+      provider_label: currentProviderLabel(),
     },
     cloud: { upstream: upstreamConfigured() },
     /* Whether a mail transport exists, so the console never promises an email
      * it cannot send. */
-    mail: { configured: Boolean(process.env.MADOVA_SMTP_URL) },
+    mail: { configured: setting('smtp_url').length > 0 },
     /* Whether the seeded demo account is still present, so the sign-in page can
      * offer it only when it exists. */
     demo_account: {
@@ -116,6 +121,8 @@ app.get('/api/auth/me', (req, res) => {
     user: publicUser(req.actor),
     account: accountSummary(req.user.id),
     role: actorRole(req),
+    /* Site administration is separate from the role held on an account. */
+    is_admin: isAdmin(req.actor),
     account_owner: req.actor.parent_id
       ? { name: req.user.name, company: req.user.company }
       : null,
@@ -162,7 +169,7 @@ app.post('/api/auth/forgot', (req, res) => {
   const email = String(req.body?.email ?? '')
   const issued = issueResetToken(email)
   if (issued) {
-    const base = process.env.MADOVA_PUBLIC_URL ?? ''
+    const base = setting('public_url')
     const link = `${base}/reset?token=${encodeURIComponent(issued.token)}`
     console.log(`[reset] ${issued.user.email} → ${link}`)
   }
@@ -170,7 +177,7 @@ app.post('/api/auth/forgot', (req, res) => {
     ok: true,
     message: 'If that address has an account, a reset link is on its way.',
     /* Without mail configured the operator reads the link from the log. */
-    delivery: process.env.MADOVA_SMTP_URL ? 'email' : 'server-log',
+    delivery: setting('smtp_url') ? 'email' : 'server-log',
   }))
 })
 
@@ -183,6 +190,84 @@ app.post('/api/auth/reset', (req, res) => {
     const status = err instanceof InputError ? err.status : 400
     errorOut(res, status, err instanceof Error ? err.message : 'Could not reset that password')
   }
+})
+
+/* --------------------------------- admin -------------------------------- */
+
+/**
+ * Site administration. Everything here configures the deployment itself, so it
+ * is gated on being the site's administrator — not merely on being signed in,
+ * and not on the account-level owner role a customer holds over their own team.
+ */
+function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (!req.actor) return errorOut(res, 401, 'Sign in to continue')
+  if (!isAdmin(req.actor)) return errorOut(res, 403, 'That is only available to the site administrator.')
+  next()
+}
+
+app.get('/api/admin/settings', requireAdmin, (_req, res) => {
+  const described = describeSettings()
+  /* The provider list is a live table, so the select is filled in here. */
+  for (const group of described.groups) {
+    for (const field of group.fields) {
+      if (field.key === 'ai_provider') field.options = providerOptions()
+    }
+  }
+  res.json(envelope({ ...described, health: health() }))
+})
+
+app.put('/api/admin/settings', requireAdmin, (req, res) => {
+  try {
+    const changed = updateSettings((req.body ?? {}) as Record<string, unknown>)
+    const described = describeSettings()
+    for (const group of described.groups) {
+      for (const field of group.fields) {
+        if (field.key === 'ai_provider') field.options = providerOptions()
+      }
+    }
+    res.json(envelope({ ...described, health: health(), changed }))
+  } catch (err) {
+    errorOut(res, 400, err instanceof Error ? err.message : 'Could not save those settings')
+  }
+})
+
+/**
+ * Keys for the public /v1 API. These belong to the operator, not to customers:
+ * they are how you automate your own fleet, and nothing in the customer console
+ * hands one out.
+ */
+app.get('/api/admin/keys', requireAdmin, (req, res) =>
+  res.json(envelope({ keys: keysOf(req.actor!.id), scopes: API_SCOPES })))
+
+app.post('/api/admin/keys', requireAdmin, (req, res) => {
+  try {
+    res.json(envelope(createApiKey(req.actor!, {
+      name: String(req.body?.name ?? ''),
+      scopes: Array.isArray(req.body?.scopes) ? req.body.scopes.map(String) : undefined,
+    })))
+  } catch (err) {
+    errorOut(res, 400, err instanceof Error ? err.message : 'Could not create that key')
+  }
+})
+
+app.delete('/api/admin/keys/:id', requireAdmin, (req, res) => {
+  try {
+    res.json(envelope({ key: revokeApiKey(req.actor!, req.params.id) }))
+  } catch (err) {
+    errorOut(res, 400, err instanceof Error ? err.message : 'Could not revoke that key')
+  }
+})
+
+/** Prove a credential works, rather than leaving the operator to guess. */
+app.post('/api/admin/test/:what', requireAdmin, async (req, res) => {
+  const what = req.params.what
+  const run = what === 'cloud' ? testUpstream
+    : what === 'assistant' ? testAssistant
+    : what === 'bsc' ? () => testChain('bsc')
+    : what === 'tron' ? () => testChain('tron')
+    : null
+  if (!run) return errorOut(res, 404, `Nothing to test called "${what}".`)
+  res.json(envelope(await run()))
 })
 
 /* ------------------------------ public API ------------------------------ */
@@ -514,6 +599,6 @@ app.listen(PORT, () => {
   console.log(`  payments     : ${enabled.length ? enabled.join(', ') : 'none configured'}`)
   for (const warning of paymentWarnings()) console.warn(`  ⚠  ${warning}`)
   console.log(`  assistant    : ${assistantConfigured()
-    ? `${PROVIDER_LABEL} · ${MODEL}`
+    ? `${currentProviderLabel()} · ${currentModel()}`
     : 'fallback router (no model provider configured)'}`)
 })

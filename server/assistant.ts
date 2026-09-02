@@ -21,24 +21,34 @@ import { REGIONS } from './fleet.js'
 import { searchArticles } from './knowledge.js'
 import { runTool, TOOL_DEFINITIONS, type ToolContext } from './assistant-tools.js'
 import { accountSummary, DURATIONS } from './billing.js'
-import { resolveProvider } from './providers.js'
+import { resolveProvider, type ResolvedProvider } from './providers.js'
 import type { Order, SupportThread, User } from './store.js'
 
-const provider = resolveProvider()
+/**
+ * The provider is resolved per call, not once at import, because credentials
+ * can be changed from the admin page while the server is running. The client is
+ * cached against the resolved configuration so an unchanged setup does not
+ * rebuild it on every message.
+ */
+let cached: { key: string; client: OpenAI } | null = null
 
-export const MODEL = provider?.model ?? null
-export const PROVIDER_ID = provider?.spec.id ?? null
-export const PROVIDER_LABEL = provider?.spec.label ?? null
-export const assistantConfigured = () => provider !== null
+function clientFor(provider: ResolvedProvider): OpenAI {
+  const key = `${provider.spec.id}|${provider.baseURL}|${provider.apiKey}`
+  if (cached?.key === key) return cached.client
+  const client = new OpenAI({
+    apiKey: provider.apiKey,
+    baseURL: provider.baseURL,
+    defaultHeaders: provider.spec.headers,
+    maxRetries: 2,
+  })
+  cached = { key, client }
+  return client
+}
 
-const client = provider
-  ? new OpenAI({
-      apiKey: provider.apiKey,
-      baseURL: provider.baseURL,
-      defaultHeaders: provider.spec.headers,
-      maxRetries: 2,
-    })
-  : null
+export const currentModel = () => resolveProvider()?.model ?? null
+export const currentProviderId = () => resolveProvider()?.spec.id ?? null
+export const currentProviderLabel = () => resolveProvider()?.spec.label ?? null
+export const assistantConfigured = () => resolveProvider() !== null
 
 const MAX_TOOL_ROUNDS = 6
 const MAX_TOKENS = 2000
@@ -161,7 +171,9 @@ export async function runAssistant(opts: {
   thread: SupportThread
   events?: AssistantEvents
 }): Promise<AssistantReply> {
-  if (!client || !provider) return runFallback(opts)
+  const provider = resolveProvider()
+  if (!provider) return runFallback(opts)
+  const client = clientFor(provider)
 
   const ctx: ToolContext = { user: opts.user, threadId: opts.thread.id }
   const actions: AssistantReply['actions'] = []

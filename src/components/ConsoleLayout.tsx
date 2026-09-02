@@ -5,7 +5,9 @@ import { Icon } from './Icon'
 import { Badge, Input, cx } from './ui'
 import { useAuth } from '@/lib/auth'
 
-const NAV: { section: string; items: { to: string; label: string; icon: string; end?: boolean }[] }[] = [
+type NavItem = { to: string; label: string; icon: string; end?: boolean; adminOnly?: boolean }
+
+const NAV: { section: string; items: NavItem[] }[] = [
   {
     section: 'Fleet',
     items: [
@@ -28,16 +30,21 @@ const NAV: { section: string; items: { to: string; label: string; icon: string; 
     section: 'Automation',
     items: [
       { to: '/console/automation', label: 'Tasks & RPA', icon: 'workflow' },
-      { to: '/console/api', label: 'API', icon: 'key' },
     ],
   },
   {
     section: 'Account',
     items: [
-      { to: '/console/resellers', label: 'Sub-accounts', icon: 'building' },
       { to: '/console/team', label: 'Team', icon: 'users' },
       { to: '/console/billing', label: 'Billing', icon: 'wallet' },
       { to: '/console/settings', label: 'Settings', icon: 'settings' },
+    ],
+  },
+  {
+    /* Only the person who runs the site sees this. */
+    section: 'Site',
+    items: [
+      { to: '/console/admin', label: 'Site settings', icon: 'shield', adminOnly: true },
     ],
   },
 ]
@@ -47,7 +54,7 @@ export function ConsoleLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
-  const { user, account, meta, logout } = useAuth()
+  const { user, account, meta, isAdmin, logout } = useAuth()
 
   const live = Boolean(meta?.cloud.upstream)
   const onTrial = (account?.plan ?? user?.plan) === 'trial'
@@ -93,7 +100,9 @@ export function ConsoleLayout() {
         )}
 
         <nav className="flex-1 overflow-y-auto px-3 py-4">
-          {NAV.map((group) => (
+          {NAV.map((group) => ({ ...group, items: group.items.filter((i) => !i.adminOnly || isAdmin) }))
+            .filter((group) => group.items.length > 0)
+            .map((group) => (
             <div key={group.section} className="mb-5">
               {!collapsed && (
                 <p className="mb-1.5 px-3 text-[0.66rem] font-semibold uppercase tracking-[0.14em] text-ink-600">
@@ -181,7 +190,7 @@ export function ConsoleLayout() {
 
           <div className="ml-auto flex items-center gap-2">
             <Link
-              to="/console/api"
+              to="/console/admin"
               className={cx(
                 'hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.74rem] font-medium ring-1 ring-inset transition-colors sm:flex',
                 live

@@ -58,7 +58,7 @@ export function SiteFooter() {
             <Link to="/legal/terms" className="hover:text-ink-300">Terms</Link>
             <Link to="/legal/privacy" className="hover:text-ink-300">Privacy</Link>
             <Link to="/legal/aup" className="hover:text-ink-300">Acceptable use</Link>
-            <Link to="/developers" className="hover:text-ink-300">API status</Link>
+            <Link to="/knowledge" className="hover:text-ink-300">Help centre</Link>
           </div>
         </div>
       </Container>

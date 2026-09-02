@@ -432,18 +432,8 @@ export const FOOTER_LINKS = [
       { label: 'Features', to: '/features' },
       { label: 'Solutions', to: '/solutions' },
       { label: 'Pricing', to: '/pricing' },
-      { label: 'Developer API', to: '/developers' },
       { label: 'Help centre', to: '/knowledge' },
       { label: 'Download', to: '/download' },
-    ],
-  },
-  {
-    heading: 'Partners',
-    links: [
-      { label: 'Reseller programme', to: '/reseller' },
-      { label: 'White label', to: '/reseller#white-label' },
-      { label: 'Affiliates', to: '/reseller#tiers' },
-      { label: 'Contact sales', to: '/contact' },
     ],
   },
   {

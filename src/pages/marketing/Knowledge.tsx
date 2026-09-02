@@ -185,14 +185,14 @@ export function Knowledge() {
               </div>
               <div className="flex gap-2.5">
                 <ButtonLink to="/contact" variant="outline">Contact us</ButtonLink>
-                <ButtonLink to="/developers" iconRight="arrowRight">API reference</ButtonLink>
+                <ButtonLink to="/register" iconRight="arrowRight">Start free</ButtonLink>
               </div>
             </Card>
 
             <p className="mt-6 text-center text-[0.78rem] text-ink-500">
-              Building an integration?{' '}
-              <Link to="/developers" className="text-brand-300 hover:text-brand-200">
-                The developer reference has every endpoint →
+              Still stuck?{' '}
+              <Link to="/contact" className="text-brand-300 hover:text-brand-200">
+                A person will answer within a few hours →
               </Link>
             </p>
           </div>

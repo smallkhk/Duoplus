@@ -5,9 +5,11 @@
  * client and one code path covers all of them — only the base URL, the API key
  * and the default model change. Adding a provider is one entry in this table.
  *
- * Pick one with MADOVA_AI_PROVIDER, or leave it unset and the first provider
- * with a key in the environment is used.
+ * Pick one on the admin page, or leave it on automatic and the first provider
+ * with a credential is used.
  */
+
+import { setting } from './settings.js'
 
 export interface ProviderSpec {
   id: string
@@ -95,7 +97,7 @@ export const PROVIDERS: ProviderSpec[] = [
   {
     id: 'custom',
     label: 'Custom OpenAI-compatible endpoint',
-    baseURL: process.env.MADOVA_AI_BASE_URL ?? '',
+    get baseURL() { return setting('ai_base_url') },
     keyEnv: ['MADOVA_AI_API_KEY'],
     defaultModel: 'default',
     notes: 'Anything speaking the OpenAI Chat Completions API — vLLM, LM Studio, a gateway.',
@@ -109,7 +111,15 @@ export interface ResolvedProvider {
   baseURL: string
 }
 
+/**
+ * The credential for one provider. An explicit key set in the admin page wins
+ * over anything in the environment, and applies to whichever provider is
+ * selected — so an operator sets one field rather than hunting for the right
+ * variable name.
+ */
 function keyFor(spec: ProviderSpec): string {
+  const fromAdmin = setting('ai_api_key')
+  if (fromAdmin) return fromAdmin
   for (const name of spec.keyEnv) {
     const value = process.env[name]
     if (value && value.trim()) return value.trim()
@@ -126,7 +136,7 @@ function keyFor(spec: ProviderSpec): string {
  * that is needed.
  */
 export function resolveProvider(): ResolvedProvider | null {
-  const requested = (process.env.MADOVA_AI_PROVIDER ?? '').trim().toLowerCase()
+  const requested = setting('ai_provider').trim().toLowerCase()
 
   const usable = (spec: ProviderSpec) => {
     if (!spec.baseURL) return false
@@ -146,7 +156,7 @@ export function resolveProvider(): ResolvedProvider | null {
     spec = PROVIDERS.find((p) => p.id === requested)
     if (!spec) {
       console.warn(
-        `[assistant] Unknown MADOVA_AI_PROVIDER "${requested}". ` +
+        `[assistant] Unknown AI provider "${requested}". ` +
         `Known providers: ${PROVIDERS.map((p) => p.id).join(', ')}.`,
       )
       return null
@@ -164,8 +174,8 @@ export function resolveProvider(): ResolvedProvider | null {
   return {
     spec,
     apiKey: keyFor(spec) || (spec.keyless ? 'not-needed' : ''),
-    model: (process.env.MADOVA_AI_MODEL ?? '').trim() || spec.defaultModel,
-    baseURL: (process.env.MADOVA_AI_BASE_URL ?? '').trim() || spec.baseURL,
+    model: setting('ai_model') || spec.defaultModel,
+    baseURL: setting('ai_base_url') || spec.baseURL,
   }
 }
 

@@ -12,6 +12,8 @@ interface AuthState {
   role: 'owner' | 'admin' | 'operator' | 'viewer'
   /** Set only when signed in as a team member, naming whose account this is. */
   accountOwner: { name: string; company: string } | null
+  /** True for the person who runs this deployment, not merely an account owner. */
+  isAdmin: boolean
   /** Null while the session is still being resolved on first paint. */
   ready: boolean
   login: (email: string, password: string) => Promise<void>
@@ -28,6 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [meta, setMeta] = useState<ServerMeta | null>(null)
   const [role, setRole] = useState<AuthState['role']>('owner')
   const [accountOwner, setAccountOwner] = useState<AuthState['accountOwner']>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
   const [ready, setReady] = useState(false)
 
   const refresh = useCallback(async () => {
@@ -37,6 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAccount(data.account ?? null)
       setRole(data.role ?? 'owner')
       setAccountOwner(data.account_owner ?? null)
+      setIsAdmin(Boolean(data.is_admin))
     } catch {
       setUser(null)
       setAccount(null)
@@ -52,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAccount(me.value.account ?? null)
         setRole(me.value.role ?? 'owner')
         setAccountOwner(me.value.account_owner ?? null)
+        setIsAdmin(Boolean(me.value.is_admin))
       }
       if (m.status === 'fulfilled') setMeta(m.value)
       setReady(true)
@@ -72,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     meta,
     role,
     accountOwner,
+    isAdmin,
     ready,
     login: async (email, password) => {
       const data = await api.login(email, password)
@@ -89,7 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAccount(null)
     },
     refresh,
-  }), [user, account, meta, role, accountOwner, ready, refresh])
+  }), [user, account, meta, role, accountOwner, isAdmin, ready, refresh])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

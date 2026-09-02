@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { Icon } from '@/components/Icon'
 import {
   Accordion, Badge, ButtonLink, Card, Container, Field, Section, SectionHeading, Select, Toggle, cx,
@@ -144,8 +143,8 @@ export function Pricing() {
             <div>
               <SectionHeading eyebrow="FAQ" title="Billing questions, answered plainly" />
               <p className="mt-6 text-[0.85rem] leading-relaxed text-ink-400">
-                Reselling to your own customers?{' '}
-                <Link to="/reseller" className="text-brand-300 hover:text-brand-200">Wholesale rates start at 30% off list</Link>.
+                Buying in volume? Pricing steps down automatically with the size of your fleet —
+                there is nothing to apply for and nothing to negotiate.
               </p>
             </div>
             <Accordion items={FAQS.slice(1, 6)} />
@@ -431,9 +430,8 @@ function VolumeTable() {
         </table>
       </div>
       <p className="mt-5 text-[0.8rem] text-ink-500">
-        Runtime is priced separately — see the calculator above. Partners on the reseller programme
-        stack a further 30–45% off these rates.{' '}
-        <Link to="/reseller" className="text-brand-300 hover:text-brand-200">Partner programme →</Link>
+        Runtime is priced separately — see the calculator above. Every discount here is applied
+        automatically at checkout from the number of devices on the order.
       </p>
     </Section>
   )

@@ -7,6 +7,7 @@ import { Badge, ButtonLink, Card, Dot, Skeleton, cx } from '@/components/ui'
 import { callData } from '@/lib/duoplus/client'
 import { REGION_INDEX } from '@/data/demo'
 import { api, type OverviewData } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 import { useProxies } from '@/lib/hooks'
 import { PHONE_STATUS_LABEL, PhoneStatus, type CloudPhone, type Paged } from '@/lib/duoplus/types'
 
@@ -23,6 +24,7 @@ export function Overview() {
   const [phones, setPhones] = useState<CloudPhone[] | null>(null)
   const [summary, setSummary] = useState<OverviewData | null>(null)
   const { proxies } = useProxies()
+  const { account } = useAuth()
 
   useEffect(() => {
     let cancelled = false
@@ -76,10 +78,23 @@ export function Overview() {
   ).sort((a, b) => b.value - a.value).slice(0, 6)
 
   const usage = summary?.usage_30d ?? []
-  const subAccounts = summary?.sub_accounts ?? []
   const tasks = summary?.tasks ?? []
   const minutesThisMonth = summary?.minutes_30d ?? 0
-  const revenueThisMonth = subAccounts.reduce((s, a) => s + a.mrr, 0)
+
+  /* How long the balance lasts at the current burn: a minute per powered-on
+     device per minute of wall clock. Undefined when nothing is running. */
+  const poweredOn = byStatus(PhoneStatus.PoweredOn)
+  const runwayDays = poweredOn === 0 || !account
+    ? null
+    : Math.max(0, Math.floor(account.minutes_balance / (poweredOn * 60 * 24)))
+
+  /* Devices whose subscription runs out soonest — the one list that costs
+     money to ignore. */
+  const expiring = [...(phones ?? [])]
+    .map((p) => ({ phone: p, at: Date.parse(p.expired_at.replace(' ', 'T') + 'Z') }))
+    .filter((row) => Number.isFinite(row.at))
+    .sort((a, b) => a.at - b.at)
+    .slice(0, 5)
   const proxyList = proxies ?? []
   const unhealthyProxies = proxyList.filter((p) => !p.healthy).length
   /* A proxy nobody has checked is not "failing" — it is simply unknown. */
@@ -131,12 +146,16 @@ export function Overview() {
           foot={`${money(minutesThisMonth * 0.0042)} at the metered rate`}
         />
         <Kpi
-          label="Sub-account MRR"
-          value={money(revenueThisMonth)}
-          delta={`${subAccounts.length} on the books`}
-          tone={subAccounts.length > 0 ? 'ok' : 'neutral'}
+          label="Prepaid minutes left"
+          value={account === null ? null : num(account.minutes_balance)}
+          delta={runwayDays === null
+            ? 'nothing running'
+            : runwayDays > 60 ? 'over two months left' : `about ${runwayDays} day${runwayDays === 1 ? '' : 's'} left`}
+          tone={runwayDays !== null && runwayDays < 7 ? 'warn' : 'ok'}
           icon="wallet"
-          foot={`${subAccounts.filter((a) => a.status === 'active').length} active reseller${subAccounts.filter((a) => a.status === 'active').length === 1 ? '' : 's'}`}
+          foot={poweredOn === 0
+            ? 'Minutes are only spent while a device is powered on'
+            : `${poweredOn} device${poweredOn === 1 ? '' : 's'} drawing down right now`}
         />
         <Kpi
           label="Proxy health"
@@ -272,63 +291,64 @@ export function Overview() {
       <Card className="mt-4 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink-800 px-6 py-4">
           <div>
-            <h2 className="text-[0.95rem] font-semibold text-ink-50">Sub-accounts</h2>
-            <p className="mt-1 text-[0.78rem] text-ink-400">Customers reselling MADOVA capacity under your brand.</p>
+            <h2 className="text-[0.95rem] font-semibold text-ink-50">Renewing soonest</h2>
+            <p className="mt-1 text-[0.78rem] text-ink-400">
+              A device stops when its subscription lapses. Renew before the date to keep it.
+            </p>
           </div>
-          <Link to="/console/resellers" className="text-[0.78rem] font-medium text-brand-300 hover:text-brand-200">
-            Manage sub-accounts →
+          <Link to="/console/phones" className="text-[0.78rem] font-medium text-brand-300 hover:text-brand-200">
+            Manage phones →
           </Link>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[46rem] border-collapse text-left text-[0.82rem]">
+          <table className="w-full min-w-[40rem] border-collapse text-left text-[0.82rem]">
             <thead>
               <tr className="border-b border-ink-800 text-[0.7rem] uppercase tracking-wider text-ink-500">
-                <th className="px-6 py-3 font-medium">Company</th>
-                <th className="px-6 py-3 font-medium">Plan</th>
-                <th className="px-6 py-3 font-medium">Phones</th>
-                <th className="px-6 py-3 font-medium">Minutes used</th>
-                <th className="px-6 py-3 font-medium">MRR</th>
-                <th className="px-6 py-3 font-medium">Margin</th>
+                <th className="px-6 py-3 font-medium">Device</th>
+                <th className="px-6 py-3 font-medium">Region</th>
+                <th className="px-6 py-3 font-medium">Group</th>
+                <th className="px-6 py-3 font-medium">Expires</th>
                 <th className="px-6 py-3 font-medium">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-800">
-              {subAccounts.length === 0 && (
+              {phones === null && (
+                <tr><td colSpan={5} className="px-6 py-6"><Skeleton className="h-4 w-full" /></td></tr>
+              )}
+              {phones?.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-6 py-8 text-center text-[0.82rem] text-ink-500">
-                    No sub-accounts yet.{' '}
-                    <Link to="/console/resellers" className="text-brand-300 hover:text-brand-200">
-                      Add your first customer
+                  <td colSpan={5} className="px-6 py-8 text-center text-[0.82rem] text-ink-500">
+                    No devices yet.{' '}
+                    <Link to="/console/store" className="text-brand-300 hover:text-brand-200">
+                      Buy your first phone
                     </Link>.
                   </td>
                 </tr>
               )}
-              {subAccounts.slice(0, 5).map((a) => {
-                const pct = a.minutes_quota > 0 ? Math.round((a.minutes_used / a.minutes_quota) * 100) : 0
+              {expiring.map(({ phone, at }) => {
+                const days = Math.ceil((at - Date.now()) / 864e5)
                 return (
-                  <tr key={a.id} className="transition-colors hover:bg-ink-800/40">
+                  <tr key={phone.id} className="transition-colors hover:bg-ink-800/40">
                     <td className="px-6 py-3.5">
-                      <span className="block font-medium text-ink-100">{a.company}</span>
-                      <span className="block text-[0.72rem] text-ink-500">{a.contact}</span>
+                      <span className="block font-medium text-ink-100">{phone.name}</span>
+                      <span className="block font-mono text-[0.7rem] text-ink-500">{phone.id}</span>
                     </td>
-                    <td className="px-6 py-3.5 text-ink-300">{a.plan}</td>
-                    <td className="px-6 py-3.5 font-mono text-ink-200">{num(a.phones)}</td>
-                    <td className="px-6 py-3.5">
-                      <div className="flex items-center gap-2.5">
-                        <div className="h-1.5 w-20 overflow-hidden rounded-full bg-ink-800">
-                          <div
-                            className={cx('h-full rounded-full', pct > 92 ? 'bg-warn' : 'bg-brand-500')}
-                            style={{ width: `${Math.min(100, pct)}%` }}
-                          />
-                        </div>
-                        <span className="font-mono text-[0.72rem] text-ink-400">{pct}%</span>
-                      </div>
+                    <td className="px-6 py-3.5 text-ink-300">{phone.area}</td>
+                    <td className="px-6 py-3.5 text-ink-400">
+                      {phone.group[0]?.name ?? <span className="text-ink-600">none</span>}
                     </td>
-                    <td className="px-6 py-3.5 font-mono text-ink-100">{money(a.mrr)}</td>
-                    <td className="px-6 py-3.5 font-mono text-ok">{a.margin}%</td>
                     <td className="px-6 py-3.5">
-                      <Badge tone={a.status === 'active' ? 'ok' : a.status === 'trial' ? 'brand' : a.status === 'past_due' ? 'warn' : 'neutral'}>
-                        {a.status.replace('_', ' ')}
+                      <span className="block font-mono text-[0.78rem] text-ink-200">
+                        {phone.expired_at.slice(0, 10)}
+                      </span>
+                      <span className={cx('block text-[0.7rem]',
+                        days < 0 ? 'text-danger' : days <= 7 ? 'text-warn' : 'text-ink-500')}>
+                        {days < 0 ? `${Math.abs(days)} days ago` : days === 0 ? 'today' : `in ${days} days`}
+                      </span>
+                    </td>
+                    <td className="px-6 py-3.5">
+                      <Badge tone={days < 0 ? 'danger' : days <= 7 ? 'warn' : 'ok'}>
+                        {days < 0 ? 'lapsed' : days <= 7 ? 'renew soon' : 'active'}
                       </Badge>
                     </td>
                   </tr>

@@ -310,21 +310,6 @@ export interface MemberRecord {
   status: 'active' | 'invited' | 'suspended'
 }
 
-export interface SubAccountRecord {
-  id: string
-  company: string
-  contact: string
-  email: string
-  plan: string
-  phones: number
-  minutes_used: number
-  minutes_quota: number
-  mrr: number
-  margin: number
-  status: 'active' | 'trial' | 'past_due' | 'churned'
-  since: string
-}
-
 export interface AppRecord {
   package_name: string
   name: string
@@ -343,11 +328,47 @@ export interface OverviewData {
   numbers: number
   tasks: TaskRecord[]
   team: number
-  sub_accounts: SubAccountRecord[]
   regions: { region: string; area: string; flag: string; count: number }[]
   usage_30d: { date: string; minutes: number; boots: number }[]
   boots_98d: { date: string; boots: number }[]
   minutes_30d: number
+}
+
+export interface SettingField {
+  key: string
+  label: string
+  kind: 'text' | 'secret' | 'number' | 'select'
+  env: string
+  hint?: string
+  placeholder?: string
+  options?: { value: string; label: string }[]
+  fallback?: string
+  /** Masked for a secret; the real value for everything else. */
+  value: string
+  set: boolean
+  source: 'admin' | 'env' | 'default' | 'unset'
+}
+
+export interface SettingGroup {
+  id: string
+  label: string
+  lead: string
+  icon: string
+  fields: SettingField[]
+}
+
+export interface HealthCheck {
+  id: string
+  label: string
+  state: 'ok' | 'warn' | 'off' | 'error'
+  detail: string
+}
+
+export interface AdminSettings {
+  groups: SettingGroup[]
+  updated_at: string | null
+  health: HealthCheck[]
+  changed?: string[]
 }
 
 export interface BatchOutcome {
@@ -366,6 +387,7 @@ export const api = {
     account?: AccountSummary
     role?: 'owner' | 'admin' | 'operator' | 'viewer'
     account_owner?: { name: string; company: string } | null
+    is_admin?: boolean
   }>('/api/auth/me'),
   login: (email: string, password: string) =>
     apiPost<{ user: SessionUser }>('/api/auth/login', { email, password }),
@@ -427,13 +449,6 @@ export const api = {
       package_name: packageName, phone_ids: phoneIds ?? [],
     }),
 
-  /* ------------------------------- API keys ----------------------------- */
-  keys: () => apiGet<{ keys: ApiKeyRecord[]; scopes: ApiScope[] }>('/api/keys'),
-  createKey: (input: { name: string; scopes: string[] }) =>
-    apiPost<{ key: ApiKeyRecord; secret: string }>('/api/keys', input),
-  rotateKey: (id: string) => apiPost<{ key: ApiKeyRecord; secret: string }>(`/api/keys/${id}/rotate`),
-  revokeKey: (id: string) => apiDelete<{ key: ApiKeyRecord }>(`/api/keys/${id}`),
-
   /* ----------------------------- cloud drive ---------------------------- */
   files: () => apiGet<{ files: FileRecord[]; usage: { bytes: number; count: number } }>('/api/files'),
   uploadFile: (file: File) => apiUpload<{ file: FileRecord }>('/api/files', file),
@@ -470,17 +485,20 @@ export const api = {
     apiPatch<{ member: MemberRecord }>(`/api/team/${id}`, input),
   removeMember: (id: string) => apiDelete<{ id: string }>(`/api/team/${id}`),
 
-  /* ----------------------------- sub-accounts --------------------------- */
-  subAccounts: () => apiGet<{ sub_accounts: SubAccountRecord[]; plans: string[] }>('/api/sub-accounts'),
-  createSubAccount: (input: {
-    company: string; contact: string; email: string
-    plan?: string; minutes_quota?: number; mrr?: number; margin?: number
-  }) => apiPost<{ sub_account: SubAccountRecord }>('/api/sub-accounts', input),
-  updateSubAccount: (id: string, input: Partial<SubAccountRecord>) =>
-    apiPatch<{ sub_account: SubAccountRecord }>(`/api/sub-accounts/${id}`, input),
-  deleteSubAccount: (id: string) => apiDelete<{ id: string }>(`/api/sub-accounts/${id}`),
-
   overview: () => apiGet<OverviewData>('/api/overview'),
+
+  /* -------------------------- site administration ----------------------- */
+  adminSettings: () => apiGet<AdminSettings>('/api/admin/settings'),
+  saveAdminSettings: (patch: Record<string, string>) =>
+    request<AdminSettings>('/api/admin/settings', {
+      method: 'PUT', body: JSON.stringify(patch),
+    }),
+  testConfig: (what: 'cloud' | 'assistant' | 'bsc' | 'tron') =>
+    apiPost<{ ok: boolean; message: string }>(`/api/admin/test/${what}`),
+  adminKeys: () => apiGet<{ keys: ApiKeyRecord[]; scopes: ApiScope[] }>('/api/admin/keys'),
+  createAdminKey: (input: { name: string; scopes: string[] }) =>
+    apiPost<{ key: ApiKeyRecord; secret: string }>('/api/admin/keys', input),
+  revokeAdminKey: (id: string) => apiDelete<{ key: ApiKeyRecord }>(`/api/admin/keys/${id}`),
 
   /* ------------------------------- account ------------------------------ */
   updateProfile: (input: { name?: string; company?: string; use_case?: string; prefs?: UserPrefs }) =>

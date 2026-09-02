@@ -31,7 +31,7 @@ export function Features() {
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <ButtonLink to="/console" iconRight="arrowRight">Try it free</ButtonLink>
-              <ButtonLink to="/developers" variant="outline" icon="code">API reference</ButtonLink>
+              <ButtonLink to="/knowledge" variant="outline" icon="message">Help centre</ButtonLink>
             </div>
           </div>
         </Container>

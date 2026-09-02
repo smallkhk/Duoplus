@@ -45,7 +45,7 @@ export function Contact() {
             <h3 className="text-[0.9rem] font-semibold text-ink-50">Before you write</h3>
             <p className="mt-2.5 text-[0.83rem] leading-relaxed text-ink-400">
               Most questions are answered faster by the docs. The{' '}
-              <a href="/developers" className="text-brand-300 hover:text-brand-200">API reference</a>{' '}
+              <a href="/knowledge" className="text-brand-300 hover:text-brand-200">help centre</a>{' '}
               covers authentication, rate limits and every endpoint; the{' '}
               <a href="/pricing#calculator" className="text-brand-300 hover:text-brand-200">calculator</a>{' '}
               will price a fleet without anyone getting involved.

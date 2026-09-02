@@ -11,13 +11,11 @@ import {
   uninstallApp, updateGroup,
 } from './fleet.js'
 import {
-  API_SCOPES, InputError, MAX_FILE_BYTES, SUB_PLANS, TASK_ACTIONS, TASK_TRIGGERS,
-  TEAM_ROLES, bindNumber, changePassword, closeAccount, createApiKey, createSubAccount,
-  createTask, deleteFile, deleteSubAccount, deleteTask, driveUsage, filesOf, inviteMember,
-  keysOf, markPushed, numbersOf, overview, publicNumber, publicTask, readFile, recordRun, releaseNumber,
-  removeMember, rentNumber, revokeApiKey, rotateApiKey, saveFile, setTaskStatus, smsOf,
-  subAccountsCsv, subAccountsOf, taskById, tasksOf, teamOf, updateMember, updateProfile,
-  updateSubAccount,
+  InputError, MAX_FILE_BYTES, TASK_ACTIONS, TASK_TRIGGERS, TEAM_ROLES,
+  bindNumber, changePassword, closeAccount, createTask, deleteFile, deleteTask,
+  driveUsage, filesOf, inviteMember, markPushed, numbersOf, overview, publicNumber,
+  publicTask, readFile, recordRun, releaseNumber, removeMember, rentNumber, saveFile,
+  setTaskStatus, smsOf, taskById, tasksOf, teamOf, updateMember, updateProfile,
 } from './resources.js'
 import { publicUser } from './store.js'
 
@@ -151,23 +149,6 @@ resourceRoutes.post('/apps/uninstall', operator, (req, res) =>
     if (!pkg) throw new InputError('Which package should be removed?')
     return { result: uninstallApp(req.user!.id, pkg, ids(req.body?.phone_ids)) }
   }))
-
-/* ------------------------------- API keys -------------------------------- */
-
-resourceRoutes.get('/keys', owner, (req, res) =>
-  handle(res, () => ({ keys: keysOf(req.user!.id), scopes: API_SCOPES })))
-
-resourceRoutes.post('/keys', owner, (req, res) =>
-  handle(res, () => createApiKey(req.user!, {
-    name: String(req.body?.name ?? ''),
-    scopes: ids(req.body?.scopes),
-  })))
-
-resourceRoutes.post('/keys/:id/rotate', owner, (req, res) =>
-  handle(res, () => rotateApiKey(req.user!, req.params.id)))
-
-resourceRoutes.delete('/keys/:id', owner, (req, res) =>
-  handle(res, () => ({ key: revokeApiKey(req.user!, req.params.id) })))
 
 /* ------------------------------ cloud drive ------------------------------ */
 
@@ -332,36 +313,6 @@ resourceRoutes.patch('/team/:id', owner, (req, res) =>
 
 resourceRoutes.delete('/team/:id', owner, (req, res) =>
   handle(res, () => removeMember(req.user!, req.params.id)))
-
-/* ------------------------------ sub-accounts ----------------------------- */
-
-resourceRoutes.get('/sub-accounts', requireAuth, (req, res) =>
-  handle(res, () => ({ sub_accounts: subAccountsOf(req.user!.id), plans: SUB_PLANS })))
-
-resourceRoutes.post('/sub-accounts', owner, (req, res) =>
-  handle(res, () => ({
-    sub_account: createSubAccount(req.user!, {
-      company: String(req.body?.company ?? ''),
-      contact: String(req.body?.contact ?? ''),
-      email: String(req.body?.email ?? ''),
-      plan: req.body?.plan ? String(req.body.plan) : undefined,
-      minutes_quota: req.body?.minutes_quota === undefined ? undefined : Number(req.body.minutes_quota),
-      mrr: req.body?.mrr === undefined ? undefined : Number(req.body.mrr),
-      margin: req.body?.margin === undefined ? undefined : Number(req.body.margin),
-    }),
-  })))
-
-resourceRoutes.patch('/sub-accounts/:id', owner, (req, res) =>
-  handle(res, () => ({ sub_account: updateSubAccount(req.user!.id, req.params.id, req.body ?? {}) })))
-
-resourceRoutes.delete('/sub-accounts/:id', owner, (req, res) =>
-  handle(res, () => deleteSubAccount(req.user!.id, req.params.id)))
-
-resourceRoutes.get('/sub-accounts.csv', owner, (req, res) => {
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8')
-  res.setHeader('Content-Disposition', 'attachment; filename="madova-sub-accounts.csv"')
-  res.send(subAccountsCsv(req.user!.id))
-})
 
 /* -------------------------------- account -------------------------------- */
 

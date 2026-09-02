@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom'
 import {
   createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState,
-  type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes,
+  type ButtonHTMLAttributes, type HTMLAttributes, type InputHTMLAttributes, type ReactNode,
+  type SelectHTMLAttributes,
 } from 'react'
 import { Icon } from './Icon'
 
@@ -134,14 +135,19 @@ export function ButtonLink({
 /* -------------------------------- cards -------------------------------- */
 
 export function Card({
-  className, children, as: As = 'div', hover = false,
-}: { className?: string; children: ReactNode; as?: 'div' | 'article' | 'li'; hover?: boolean }) {
+  className, children, as: As = 'div', hover = false, ...rest
+}: {
+  className?: string; children: ReactNode; as?: 'div' | 'article' | 'li'; hover?: boolean
+} & HTMLAttributes<HTMLElement>) {
   return (
-    <As className={cx(
-      'rounded-2xl border border-ink-700/70 bg-ink-900/60 ring-hairline',
-      hover && 'transition-colors duration-200 hover:border-brand-500/45 hover:bg-ink-850/80',
-      className,
-    )}>
+    <As
+      className={cx(
+        'rounded-2xl border border-ink-700/70 bg-ink-900/60 ring-hairline',
+        hover && 'transition-colors duration-200 hover:border-brand-500/45 hover:bg-ink-850/80',
+        className,
+      )}
+      {...rest}
+    >
       {children}
     </As>
   )

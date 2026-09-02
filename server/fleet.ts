@@ -10,6 +10,7 @@
  * never sees it.
  */
 import net from 'node:net'
+import { setting } from './settings.js'
 import {
   db, mutate, nowIso, prefixedId, shortId,
   type Database, type Owned, type StoredPhone, type User,
@@ -21,9 +22,9 @@ import {
   type SmsMessage,
 } from '../src/lib/duoplus/types.js'
 
-export const UPSTREAM_BASE = process.env.MADOVA_UPSTREAM_BASE ?? 'https://openapi.duoplus.net'
-export const UPSTREAM_KEY = process.env.MADOVA_UPSTREAM_KEY ?? ''
-export const upstreamConfigured = () => UPSTREAM_KEY.trim().length > 0
+export const upstreamBase = () => setting('upstream_base')
+export const upstreamKey = () => setting('upstream_key')
+export const upstreamConfigured = () => upstreamKey().length > 0
 
 export const REGIONS = [
   { region: 'us-west', area: 'United States', cc: 'US', flag: '🇺🇸', tz: 'America/Los_Angeles', lang: 'en-US', operator: 'T-Mobile' },
@@ -815,12 +816,12 @@ export function localCall(user: User, path: string, body: Record<string, any>): 
 
 /** Forward a call to the real upstream API with the server-held key. */
 async function upstreamCall(path: string, body: Record<string, any>, lang: string): Promise<ApiEnvelope<any>> {
-  const res = await fetch(`${UPSTREAM_BASE}${path}`, {
+  const res = await fetch(`${upstreamBase()}${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Lang: lang,
-      'DuoPlus-API-Key': UPSTREAM_KEY,
+      'DuoPlus-API-Key': upstreamKey(),
     },
     body: JSON.stringify(body),
   })

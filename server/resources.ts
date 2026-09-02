@@ -822,7 +822,6 @@ export function overview(user: User) {
     numbers: db().numbers.filter((n) => n.owner_id === user.id).length,
     tasks: tasksOf(user.id),
     team: teamOf(user).length,
-    sub_accounts: subAccountsOf(user.id),
     regions: [...byRegion.entries()]
       .map(([region, count]) => ({
         region,

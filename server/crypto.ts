@@ -15,6 +15,7 @@
  * would need a live rate and a slippage window, which is a different feature.
  */
 import QRCode from 'qrcode'
+import { setting, settingNumber } from './settings.js'
 import { db, mutate, nowIso, type Order } from './store.js'
 
 export type ChainId = 'bsc' | 'tron'
@@ -36,15 +37,20 @@ export interface ChainSpec {
   paymentUri: (address: string, units: string, contract: string) => string
 }
 
+/**
+ * Chain definitions. Contract and decimals are read through `setting()` at call
+ * time rather than captured here, so changing them in the admin page takes
+ * effect on the next request.
+ */
 export const CHAINS: Record<ChainId, ChainSpec> = {
   bsc: {
     id: 'bsc',
     label: 'BNB Smart Chain',
     network: 'BEP-20',
     token: 'USDT',
-    contract: process.env.MADOVA_BSC_USDT_CONTRACT ?? '0x55d398326f99059fF775485246999027B3197955',
+    get contract() { return setting('bsc_usdt_contract') },
     /* Binance-Peg USDT is 18 decimals, unlike USDT on most other chains. */
-    decimals: Number(process.env.MADOVA_BSC_USDT_DECIMALS ?? 18),
+    get decimals() { return settingNumber('bsc_usdt_decimals', 18) },
     addressEnv: 'MADOVA_BSC_ADDRESS',
     explorerTx: (h) => `https://bscscan.com/tx/${h}`,
     /* EIP-681: uint256 is the raw token amount. A decimal here makes wallets
@@ -57,8 +63,8 @@ export const CHAINS: Record<ChainId, ChainSpec> = {
     label: 'Tron',
     network: 'TRC-20',
     token: 'USDT',
-    contract: process.env.MADOVA_TRON_USDT_CONTRACT ?? 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
-    decimals: Number(process.env.MADOVA_TRON_USDT_DECIMALS ?? 6),
+    get contract() { return setting('tron_usdt_contract') },
+    get decimals() { return settingNumber('tron_usdt_decimals', 6) },
     addressEnv: 'MADOVA_TRON_ADDRESS',
     explorerTx: (h) => `https://tronscan.org/#/transaction/${h}`,
     /* Tron has no deep-link standard that reliably carries a TRC-20 contract:
@@ -70,7 +76,7 @@ export const CHAINS: Record<ChainId, ChainSpec> = {
 }
 
 export const merchantAddress = (chain: ChainId): string =>
-  (process.env[CHAINS[chain].addressEnv] ?? '').trim()
+  setting(chain === 'bsc' ? 'bsc_address' : 'tron_address')
 
 /**
  * Shape of a valid receiving address per chain.
@@ -88,7 +94,7 @@ export function addressProblem(chain: ChainId): string | null {
   const address = merchantAddress(chain)
   if (!address) return null // not configured at all — that is fine, the chain is just off
   if (!ADDRESS_PATTERN[chain].test(address)) {
-    return `${CHAINS[chain].addressEnv} is not a valid ${CHAINS[chain].label} address `
+    return `The ${CHAINS[chain].label} receiving address is not valid `
       + `("${address.slice(0, 24)}${address.length > 24 ? '…' : ''}"). `
       + `${CHAINS[chain].label} payments are disabled until it is corrected.`
   }
@@ -111,9 +117,9 @@ export function paymentWarnings(): string[] {
 }
 
 /** How long an invoice stays valid, and how settled a transfer must be. */
-const WINDOW_MINUTES = Number(process.env.MADOVA_PAYMENT_WINDOW_MIN ?? 40)
-const BSC_CONFIRMATIONS = Number(process.env.MADOVA_BSC_CONFIRMATIONS ?? 12)
-const TRON_MIN_AGE_SEC = Number(process.env.MADOVA_TRON_MIN_AGE_SEC ?? 60)
+const windowMinutes = () => settingNumber('payment_window_min', 40)
+const bscConfirmations = () => settingNumber('bsc_confirmations', 12)
+const tronMinAgeSec = () => settingNumber('tron_min_age_sec', 60)
 
 export interface PaymentIntent {
   chain: ChainId
@@ -195,7 +201,7 @@ export async function createIntent(order: Order, chain: ChainId): Promise<Paymen
     amount_units: units,
     contract: spec.contract,
     created_at: new Date(now).toISOString(),
-    expires_at: new Date(now + WINDOW_MINUTES * 60_000).toISOString(),
+    expires_at: new Date(now + windowMinutes() * 60_000).toISOString(),
     status: 'awaiting',
     payment_uri: uri,
     qr_svg: await QRCode.toString(uri, { type: 'svg', margin: 1, width: 220 }),
@@ -221,7 +227,7 @@ async function fetchJson(url: string, headers: Record<string, string> = {}): Pro
 /** Recent BEP-20 transfers into the merchant address. */
 async function bscTransfers(address: string): Promise<Transfer[]> {
   const base = process.env.MADOVA_BSCSCAN_BASE ?? 'https://api.etherscan.io/v2/api?chainid=56'
-  const key = process.env.MADOVA_BSCSCAN_API_KEY ?? ''
+  const key = setting('bscscan_api_key')
   const url = `${base}${base.includes('?') ? '&' : '?'}module=account&action=tokentx`
     + `&contractaddress=${CHAINS.bsc.contract}&address=${address}`
     + `&page=1&offset=50&sort=desc${key ? `&apikey=${key}` : ''}`
@@ -240,7 +246,7 @@ async function bscTransfers(address: string): Promise<Transfer[]> {
 /** Recent TRC-20 transfers into the merchant address. */
 async function tronTransfers(address: string): Promise<Transfer[]> {
   const base = process.env.MADOVA_TRONGRID_BASE ?? 'https://api.trongrid.io'
-  const key = process.env.MADOVA_TRONGRID_API_KEY ?? ''
+  const key = setting('trongrid_api_key')
   const url = `${base}/v1/accounts/${address}/transactions/trc20`
     + `?limit=50&only_confirmed=true&contract_address=${CHAINS.tron.contract}`
 
@@ -312,8 +318,8 @@ export async function checkIntent(order: Order): Promise<CheckResult> {
 
   const explorer = spec.explorerTx(match.hash)
   const settled = intent.chain === 'bsc'
-    ? (match.confirmations ?? 0) >= BSC_CONFIRMATIONS
-    : Date.now() - match.timestampMs >= TRON_MIN_AGE_SEC * 1000
+    ? (match.confirmations ?? 0) >= bscConfirmations()
+    : Date.now() - match.timestampMs >= tronMinAgeSec() * 1000
 
   if (!settled) {
     const depth = intent.chain === 'bsc'
@@ -351,13 +357,13 @@ export function applyCheck(orderId: string, result: CheckResult) {
 
 export const paymentConfig = () => ({
   enabled: enabledChains(),
-  window_minutes: WINDOW_MINUTES,
+  window_minutes: windowMinutes(),
   chains: enabledChains().map((id) => ({
     id,
     label: CHAINS[id].label,
     network: CHAINS[id].network,
     token: CHAINS[id].token,
-    confirmations: id === 'bsc' ? BSC_CONFIRMATIONS : undefined,
-    settle_after_seconds: id === 'tron' ? TRON_MIN_AGE_SEC : undefined,
+    confirmations: id === 'bsc' ? bscConfirmations() : undefined,
+    settle_after_seconds: id === 'tron' ? tronMinAgeSec() : undefined,
   })),
 })

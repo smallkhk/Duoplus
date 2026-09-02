@@ -27,7 +27,6 @@ export function Home() {
       <HowItWorks />
       <SolutionsPreview />
       <ApiBand />
-      <ResellerBand />
       <PricingPreview />
       <Testimonials />
       <Faq />
@@ -48,13 +47,13 @@ function Hero() {
         <div className="grid items-center gap-14 py-20 lg:grid-cols-[1.05fr_0.95fr] lg:py-28">
           <div className="animate-rise">
             <Link
-              to="/developers"
+              to="/features"
               className="inline-flex items-center gap-2 rounded-full border border-ink-700 bg-ink-900/70 py-1 pl-1 pr-3 text-[0.76rem] text-ink-300 transition-colors hover:border-brand-500/50 hover:text-ink-100"
             >
               <span className="rounded-full bg-brand-500/20 px-2 py-0.5 text-[0.68rem] font-semibold text-brand-200">
                 New
               </span>
-              Open API + ADB on every device
+              Full ADB access on every device
               <Icon name="arrowRight" className="size-3.5" />
             </Link>
 
@@ -332,8 +331,8 @@ function ApiBand() {
               ))}
             </ul>
             <div className="mt-8 flex flex-wrap gap-3">
-              <ButtonLink to="/developers" iconRight="arrowRight">Read the API reference</ButtonLink>
-              <ButtonLink to="/console/api" variant="outline" icon="key">Get an API key</ButtonLink>
+              <ButtonLink to="/register" iconRight="arrowRight">Start with a free phone</ButtonLink>
+              <ButtonLink to="/pricing" variant="outline">See pricing</ButtonLink>
             </div>
           </div>
 
@@ -371,48 +370,6 @@ function ApiBand() {
         </div>
       </Section>
     </div>
-  )
-}
-
-/* ------------------------------- reseller ------------------------------ */
-
-function ResellerBand() {
-  return (
-    <Section>
-      <Card className="relative overflow-hidden p-8 sm:p-12">
-        <div className="pointer-events-none absolute inset-0 bg-aurora opacity-70" />
-        <div className="relative grid items-center gap-10 lg:grid-cols-[1.15fr_0.85fr]">
-          <div>
-            <Badge tone="brand">Partner programme</Badge>
-            <h2 className="mt-5 text-balance text-3xl font-semibold leading-tight tracking-tight text-ink-50 sm:text-4xl">
-              Sell cloud phones under your own brand
-            </h2>
-            <p className="mt-5 max-w-xl text-pretty text-[0.95rem] leading-relaxed text-ink-300">
-              You bring the customers and the market knowledge. MADOVA brings the fleet, the control
-              plane and the billing. Wholesale rates from 30% off list, sub-accounts with their own
-              quotas, and a console on your domain carrying your logo.
-            </p>
-            <div className="mt-7 flex flex-wrap gap-3">
-              <ButtonLink to="/reseller" iconRight="arrowRight">Partner programme</ButtonLink>
-              <ButtonLink to="/contact" variant="outline">Talk to sales</ButtonLink>
-            </div>
-          </div>
-          <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-ink-700 bg-ink-700">
-            {[
-              ['45%', 'Max wholesale discount'],
-              ['You', 'Set retail pricing'],
-              ['1', 'Consolidated invoice'],
-              ['0', 'Infrastructure to run'],
-            ].map(([v, l]) => (
-              <div key={l} className="bg-ink-950 p-5">
-                <dt className="font-mono text-2xl font-semibold text-ink-50">{v}</dt>
-                <dd className="mt-1 text-[0.76rem] leading-snug text-ink-400">{l}</dd>
-              </div>
-            ))}
-          </dl>
-        </div>
-      </Card>
-    </Section>
   )
 }
 
