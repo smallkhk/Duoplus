@@ -8,7 +8,10 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import type { CloudPhone } from '../src/lib/duoplus/types'
+import type {
+  AutomationTask, CloudDriveFile, CloudNumber, CloudPhone, InstalledApp, PhoneGroup,
+  Proxy, SmsMessage, SubAccount, TeamMember,
+} from '../src/lib/duoplus/types'
 import type { PaymentIntent } from './crypto.js'
 
 /**
@@ -18,6 +21,13 @@ import type { PaymentIntent } from './crypto.js'
  */
 const DATA_DIR = process.env.MADOVA_DATA_DIR ?? path.join(process.cwd(), 'data')
 const DB_PATH = path.join(DATA_DIR, 'madova.json')
+/** Uploaded bytes live beside the database rather than inside it. */
+export const FILE_DIR = path.join(DATA_DIR, 'files')
+
+export function fileDir(): string {
+  fs.mkdirSync(FILE_DIR, { recursive: true })
+  return FILE_DIR
+}
 
 export type UserRole = 'owner' | 'admin' | 'operator' | 'viewer'
 export type PlanId = 'trial' | 'starter' | 'growth' | 'scale'
@@ -34,9 +44,32 @@ export interface User {
   created_at: string
   /** Prepaid startup minutes remaining. */
   minutes_balance: number
-  /** Account credit in USD cents, used to settle orders in this demo build. */
+  /** Account credit in USD cents. Settles orders and rents cloud numbers. */
   credit_cents: number
   use_case: string
+  /**
+   * Set on a team member's login: the owner whose account they work inside.
+   * Absent on an account owner. Every resource is scoped to the owner, so a
+   * member sees the owner's fleet, not an empty one of their own.
+   */
+  parent_id?: string
+  /** Console preferences. Absent on accounts created before they existed. */
+  prefs?: UserPrefs
+}
+
+/** Account-level settings the console writes and reads back. */
+export interface UserPrefs {
+  timezone?: string
+  language?: string
+  /** Which events raise an email. Only delivered when a mail transport is set. */
+  notifications?: Record<string, boolean>
+  security?: Record<string, boolean>
+  brand?: {
+    display_name?: string
+    console_domain?: string
+    support_email?: string
+    accent?: string
+  }
 }
 
 export type OrderStatus = 'pending' | 'paid' | 'cancelled' | 'failed'
@@ -96,15 +129,95 @@ export interface SupportThread {
   updated_at: string
 }
 
+/** Every record below is scoped to the account that owns it. */
+export type Owned<T> = T & { owner_id: string }
+
+/** A device, plus the app changes and metering state carried on it. */
+export type StoredPhone = Owned<CloudPhone> & {
+  installed_apps?: InstalledApp[]
+  removed_apps?: string[]
+  /**
+   * When the current powered-on stretch started, as an epoch millisecond.
+   * Metering accrues from here to now and then moves the marker forward, so a
+   * device that stays up for weeks is still billed day by day.
+   */
+  metered_from?: number
+}
+
+/** One day of consumption for one account. The unit customers buy is a minute. */
+export interface UsageDay {
+  owner_id: string
+  /** YYYY-MM-DD, in UTC. */
+  date: string
+  minutes: number
+  boots: number
+}
+
+export interface ApiKey {
+  id: string
+  owner_id: string
+  name: string
+  /** First characters of the secret, shown in the console to identify a key. */
+  prefix: string
+  /** scrypt hash of the secret. The secret itself is shown once and never stored. */
+  secret_hash: string
+  secret_salt: string
+  scopes: string[]
+  created_at: string
+  last_used_at?: string
+  revoked_at?: string
+}
+
+/** A file in the account's cloud drive. Bytes live beside the database. */
+export type StoredFile = Owned<CloudDriveFile> & {
+  /** Filename under the data directory's `files/` folder. */
+  blob: string
+  mime: string
+  bytes: number
+}
+
+export type StoredNumber = Owned<CloudNumber> & { messages: SmsMessage[] }
+
+export type StoredTask = Owned<AutomationTask> & {
+  action: string
+  /** Only set for ADB tasks. */
+  command?: string
+  group_id: string
+  phone_ids: string[]
+  runs: { at: string; ok: number; failed: number }[]
+  created_at: string
+}
+
+/** A team member is a user in their own right once they accept the invite. */
+export type StoredMember = Owned<TeamMember> & {
+  invite_token?: string
+  user_id?: string
+  created_at: string
+}
+
 export interface Database {
   version: number
   users: User[]
-  phones: (CloudPhone & { owner_id: string })[]
+  phones: StoredPhone[]
   orders: Order[]
   threads: SupportThread[]
+  groups: Owned<PhoneGroup>[]
+  proxies: Owned<Proxy>[]
+  api_keys: ApiKey[]
+  files: StoredFile[]
+  numbers: StoredNumber[]
+  tasks: StoredTask[]
+  members: StoredMember[]
+  sub_accounts: Owned<SubAccount>[]
+  usage: UsageDay[]
 }
 
-const EMPTY: Database = { version: 1, users: [], phones: [], orders: [], threads: [] }
+const EMPTY: Database = {
+  version: 2,
+  users: [], phones: [], orders: [], threads: [],
+  groups: [], proxies: [], api_keys: [], files: [],
+  numbers: [], tasks: [], members: [], sub_accounts: [], usage: [],
+}
 
 let cache: Database | null = null
 /** Modification time of the file the cache was built from. */

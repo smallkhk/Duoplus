@@ -3,11 +3,12 @@ import { PageHeader } from '@/components/ConsoleLayout'
 import { Icon } from '@/components/Icon'
 import { PhoneFrame } from '@/components/PhoneFrame'
 import {
-  Badge, Button, Card, Checkbox, Code, CopyButton, Dot, EmptyState, Field, Input, Modal,
-  Select, Skeleton, cx, useToast,
+  Badge, Button, ButtonLink, Card, Checkbox, Code, CopyButton, Dot, EmptyState, Field, Input,
+  Modal, Select, Skeleton, cx, useToast,
 } from '@/components/ui'
 import { callData } from '@/lib/duoplus/client'
-import { GROUPS, REGION_INDEX } from '@/data/demo'
+import { REGION_INDEX } from '@/data/demo'
+import { api, type GroupRecord } from '@/lib/api'
 import { useProxies } from '@/lib/hooks'
 import {
   PHONE_STATUS_LABEL, PhoneStatus, START_PHONE_TYPE_LABEL,
@@ -49,6 +50,11 @@ export function Phones() {
   const [adbOpen, setAdbOpen] = useState(false)
   const [renewOpen, setRenewOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
+  const [groups, setGroups] = useState<GroupRecord[]>([])
+
+  useEffect(() => {
+    api.groups().then((d) => setGroups(d.groups)).catch(() => setGroups([]))
+  }, [])
 
   const load = useCallback(async (next: CloudPhoneListRequest) => {
     setLoading(true)
@@ -140,9 +146,7 @@ export function Phones() {
         actions={
           <>
             <Button variant="secondary" size="sm" icon="refresh" onClick={() => void load(filters)}>Refresh</Button>
-            <Button size="sm" icon="plus" onClick={() => toast('Provisioning is not wired up in this demo build.', 'info')}>
-              New cloud phone
-            </Button>
+            <ButtonLink to="/console/buy" size="sm" icon="plus">New cloud phone</ButtonLink>
           </>
         }
       />
@@ -178,7 +182,7 @@ export function Phones() {
             aria-label="Group"
           >
             <option value="">All groups</option>
-            {GROUPS.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+            {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
           </Select>
 
           <Select
@@ -424,7 +428,7 @@ function PhoneDrawer({
   phone, onClose, onChanged,
 }: { phone: CloudPhone | null; onClose: () => void; onChanged: () => void }) {
   const toast = useToast()
-  const proxies = useProxies()
+  const { proxies } = useProxies()
   const [tab, setTab] = useState<DrawerTab>('overview')
   const [busy, setBusy] = useState(false)
 

@@ -1,29 +1,88 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { PageHeader } from '@/components/ConsoleLayout'
 import { Icon } from '@/components/Icon'
 import {
-  Badge, Button, Card, Code, CopyButton, Field, Input, Modal, Select, cx, useToast,
+  Badge, Button, Card, Code, CopyButton, Field, Input, Modal, Select, Skeleton, cx, useToast,
 } from '@/components/ui'
+import { api, ApiError, type ApiKeyRecord, type ApiScope } from '@/lib/api'
 import { getLang, getRequestLog, setLang, type Lang, type RequestLogEntry } from '@/lib/duoplus/client'
 import { useAuth } from '@/lib/auth'
-import { API_BASE_URL, API_KEY_HEADER, API_QPS_LIMIT, ENDPOINTS } from '@/lib/duoplus/endpoints'
+import { API_BASE_URL, API_QPS_LIMIT, ENDPOINTS } from '@/lib/duoplus/endpoints'
 
-const DEMO_KEYS = [
-  { id: 'k_prod', label: 'Production', masked: 'mdv_live_7f2a••••••••••••••••3c91', created: '2026-05-02', lastUsed: '2 min ago', calls: 184_302 },
-  { id: 'k_ci', label: 'CI pipeline', masked: 'mdv_live_b41c••••••••••••••••88de', created: '2026-06-19', lastUsed: '41 min ago', calls: 22_918 },
-  { id: 'k_dev', label: 'Local development', masked: 'mdv_test_0c93••••••••••••••••41aa', created: '2026-08-11', lastUsed: '3 days ago', calls: 1_204 },
-]
+/** The public API is served from this deployment, so the origin is the base URL. */
+const origin = typeof window === 'undefined' ? 'https://your-madova-domain' : window.location.origin
 
 export function ApiKeys() {
   const toast = useToast()
   const { meta } = useAuth()
   const [lang, setLangState] = useState<Lang>(getLang)
   const [log, setLog] = useState<RequestLogEntry[]>(getRequestLog())
+
+  const [keys, setKeys] = useState<ApiKeyRecord[] | null>(null)
+  const [scopes, setScopes] = useState<ApiScope[]>([])
   const [createOpen, setCreateOpen] = useState(false)
-  const [revealed, setRevealed] = useState<string | null>(null)
+  const [name, setName] = useState('')
+  const [chosen, setChosen] = useState<string[]>(['phones:read'])
+  const [busy, setBusy] = useState(false)
+  const [revoking, setRevoking] = useState<ApiKeyRecord | null>(null)
+  /** The one moment a secret is visible. Cleared as soon as the dialog closes. */
+  const [issued, setIssued] = useState<{ key: ApiKeyRecord; secret: string } | null>(null)
 
   const upstream = Boolean(meta?.cloud.upstream)
+
+  const load = useCallback(() => {
+    api.keys()
+      .then((d) => { setKeys(d.keys); setScopes(d.scopes) })
+      .catch(() => setKeys([]))
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  const create = async () => {
+    setBusy(true)
+    try {
+      const result = await api.createKey({ name, scopes: chosen })
+      setIssued(result)
+      setCreateOpen(false)
+      setName('')
+      setChosen(['phones:read'])
+      load()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not create that key.', 'danger')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const rotate = async (key: ApiKeyRecord) => {
+    try {
+      setIssued(await api.rotateKey(key.id))
+      toast(`${key.name} rotated — the old secret stopped working immediately.`, 'ok')
+      load()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not rotate that key.', 'danger')
+    }
+  }
+
+  const revoke = async () => {
+    if (!revoking) return
+    setBusy(true)
+    try {
+      await api.revokeKey(revoking.id)
+      toast(`${revoking.name} revoked.`, 'ok')
+      setRevoking(null)
+      load()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not revoke that key.', 'danger')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const toggleScope = (id: string) =>
+    setChosen((cur) => (cur.includes(id) ? cur.filter((s) => s !== id) : [...cur, id]))
+
+  const active = keys?.filter((k) => k.status === 'active') ?? []
 
   useEffect(() => {
     const sync = () => setLog([...getRequestLog()])
@@ -112,56 +171,81 @@ export function ApiKeys() {
             <div className="border-b border-ink-800 px-6 py-4">
               <h2 className="text-[0.95rem] font-semibold text-ink-50">Keys</h2>
               <p className="mt-1 text-[0.8rem] text-ink-400">
-                Keys are account-scoped and grant access to every endpoint. Revoking one takes effect immediately.
+                Each key carries only the scopes you grant it. Rotating issues a new secret and retires the old one; revoking takes effect immediately.
               </p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[42rem] border-collapse text-left text-[0.82rem]">
                 <thead>
                   <tr className="border-b border-ink-800 text-[0.7rem] uppercase tracking-wider text-ink-500">
-                    <th className="px-6 py-3 font-medium">Label</th>
+                    <th className="px-6 py-3 font-medium">Name</th>
                     <th className="px-6 py-3 font-medium">Key</th>
-                    <th className="px-6 py-3 font-medium">Calls</th>
+                    <th className="px-6 py-3 font-medium">Scopes</th>
                     <th className="px-6 py-3 font-medium">Last used</th>
                     <th className="px-6 py-3 font-medium"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ink-800">
-                  {DEMO_KEYS.map((k) => (
-                    <tr key={k.id} className="transition-colors hover:bg-ink-800/40">
+                  {keys === null && Array.from({ length: 3 }, (_, i) => (
+                    <tr key={i}>{Array.from({ length: 5 }, (_, j) => (
+                      <td key={j} className="px-6 py-4"><Skeleton className="h-4 w-full" /></td>
+                    ))}</tr>
+                  ))}
+
+                  {keys?.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-10 text-center text-[0.82rem] text-ink-500">
+                        No keys yet. Create one to call the API from your own code.
+                      </td>
+                    </tr>
+                  )}
+
+                  {keys?.map((k) => (
+                    <tr key={k.id} className={cx('transition-colors hover:bg-ink-800/40', k.revoked_at && 'opacity-55')}>
                       <td className="px-6 py-3.5">
-                        <span className="block font-medium text-ink-100">{k.label}</span>
-                        <span className="block text-[0.7rem] text-ink-500">Created {k.created}</span>
+                        <span className="flex items-center gap-2">
+                          <span className="font-medium text-ink-100">{k.name}</span>
+                          {k.revoked_at && <Badge tone="danger">revoked</Badge>}
+                        </span>
+                        <span className="block text-[0.7rem] text-ink-500">Created {k.created_at.slice(0, 10)}</span>
                       </td>
                       <td className="px-6 py-3.5">
-                        <code className="font-mono text-[0.74rem] text-ink-300">
-                          {revealed === k.id ? k.masked.replace(/•+/, 'REDACTED_IN_DEMO') : k.masked}
-                        </code>
+                        <code className="font-mono text-[0.74rem] text-ink-300">{k.prefix}…</code>
+                        <span className="block text-[0.68rem] text-ink-600">shown once at creation</span>
                       </td>
-                      <td className="px-6 py-3.5 font-mono text-ink-200">{k.calls.toLocaleString('en-US')}</td>
-                      <td className="px-6 py-3.5 text-ink-400">{k.lastUsed}</td>
+                      <td className="px-6 py-3.5">
+                        <span className="flex flex-wrap gap-1">
+                          {k.scopes.map((sc) => (
+                            <span key={sc} className="rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[0.66rem] text-ink-300">
+                              {sc}
+                            </span>
+                          ))}
+                        </span>
+                      </td>
+                      <td className="px-6 py-3.5 text-ink-400">
+                        {k.last_used_at ? k.last_used_at.slice(0, 16) : 'never'}
+                      </td>
                       <td className="px-6 py-3.5">
                         <div className="flex justify-end gap-1">
-                          <Button
-                            size="sm" variant="ghost"
-                            onClick={() => setRevealed(revealed === k.id ? null : k.id)}
-                          >
-                            {revealed === k.id ? 'Hide' : 'Reveal'}
-                          </Button>
-                          <button
-                            onClick={() => toast('Key rotation is not wired up in this demo build.', 'info')}
-                            className="rounded-lg p-1.5 text-ink-500 hover:bg-ink-800 hover:text-ink-100"
-                            aria-label={`Rotate ${k.label}`}
-                          >
-                            <Icon name="refresh" className="size-3.5" />
-                          </button>
-                          <button
-                            onClick={() => toast('Key revocation is not wired up in this demo build.', 'info')}
-                            className="rounded-lg p-1.5 text-ink-500 hover:bg-danger/10 hover:text-danger"
-                            aria-label={`Revoke ${k.label}`}
-                          >
-                            <Icon name="trash" className="size-3.5" />
-                          </button>
+                          {!k.revoked_at && (
+                            <>
+                              <button
+                                onClick={() => rotate(k)}
+                                className="rounded-lg p-1.5 text-ink-500 hover:bg-ink-800 hover:text-ink-100"
+                                aria-label={`Rotate ${k.name}`}
+                                title="Rotate — issues a new secret and kills this one"
+                              >
+                                <Icon name="refresh" className="size-3.5" />
+                              </button>
+                              <button
+                                onClick={() => setRevoking(k)}
+                                className="rounded-lg p-1.5 text-ink-500 hover:bg-danger/10 hover:text-danger"
+                                aria-label={`Revoke ${k.name}`}
+                              >
+                                <Icon name="trash" className="size-3.5" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -177,17 +261,18 @@ export function ApiKeys() {
             <p className="mt-1.5 mb-4 text-[0.82rem] text-ink-400">
               Every endpoint is a POST that takes JSON and returns the same envelope.
             </p>
-            <Code>{`curl -X POST ${API_BASE_URL}/api/v1/cloudPhone/list \\
+            <Code>{`curl -X POST ${origin}/v1/cloudPhone/list \\
   -H "Content-Type: application/json" \\
   -H "Lang: ${lang}" \\
-  -H "${API_KEY_HEADER}: $MADOVA_KEY" \\
+  -H "Authorization: Bearer $MADOVA_KEY" \\
   -d '{"page":1,"pagesize":10}'`}</Code>
             <div className="mt-3 flex items-center justify-between">
               <p className="text-[0.75rem] text-ink-500">
-                {ENDPOINTS.length} endpoints documented · {API_QPS_LIMIT} QPS per endpoint
+                {ENDPOINTS.length} endpoints documented · {API_QPS_LIMIT} QPS per endpoint ·{' '}
+                {active.length} active key{active.length === 1 ? '' : 's'}
               </p>
               <CopyButton
-                text={`curl -X POST ${API_BASE_URL}/api/v1/cloudPhone/list -H "Content-Type: application/json" -H "${API_KEY_HEADER}: $MADOVA_KEY" -d '{"page":1,"pagesize":10}'`}
+                text={`curl -X POST ${origin}/v1/cloudPhone/list -H "Content-Type: application/json" -H "Authorization: Bearer $MADOVA_KEY" -d '{"page":1,"pagesize":10}'`}
                 label="Copy command"
               />
             </div>
@@ -237,30 +322,90 @@ export function ApiKeys() {
         footer={
           <>
             <Button variant="ghost" onClick={() => setCreateOpen(false)}>Cancel</Button>
-            <Button onClick={() => { setCreateOpen(false); toast('Key creation is not wired up in this demo build.', 'info') }}>
+            <Button onClick={create} loading={busy} disabled={name.trim().length < 2 || chosen.length === 0}>
               Create key
             </Button>
           </>
         }
       >
         <div className="space-y-5">
-          <Field label="Label" hint="Something you will recognise in the log six months from now.">
-            <Input placeholder="Production scheduler" />
+          <Field label="Name" hint="Something you will recognise in the log six months from now.">
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Production scheduler"
+              autoFocus
+            />
           </Field>
-          <Field label="Environment">
-            <Select defaultValue="live">
-              <option value="live">Live — bills real usage</option>
-              <option value="test">Test — sandbox fleet only</option>
-            </Select>
+          <Field label="Scopes" hint="A key can only call what its scopes allow. Grant the least you need.">
+            <div className="space-y-2">
+              {scopes.map((sc) => (
+                <label
+                  key={sc.id}
+                  className="flex cursor-pointer items-start gap-3 rounded-lg border border-ink-800 p-3 transition-colors hover:border-ink-700"
+                >
+                  <input
+                    type="checkbox"
+                    checked={chosen.includes(sc.id)}
+                    onChange={() => toggleScope(sc.id)}
+                    className="mt-0.5 size-4 accent-brand-500"
+                  />
+                  <span>
+                    <code className="block font-mono text-[0.76rem] text-ink-100">{sc.id}</code>
+                    <span className="block text-[0.76rem] text-ink-400">{sc.label}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
           </Field>
           <div className="flex items-start gap-2.5 rounded-lg border border-warn/30 bg-warn/5 p-3.5">
             <Icon name="alert" className="mt-0.5 size-4 shrink-0 text-warn" />
             <p className="text-[0.78rem] leading-relaxed text-ink-300">
-              A key grants access to every endpoint on the account, including renewal, which spends
-              money. Treat it like a password and never commit it.
+              The secret is shown once, at creation, and is stored only as a hash — MADOVA cannot
+              recover it for you. Treat it like a password and never commit it.
             </p>
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        open={issued !== null}
+        onClose={() => setIssued(null)}
+        title={`${issued?.key.name ?? 'Key'} is ready`}
+        description="Copy it now. This is the only time it will ever be shown."
+        footer={<Button onClick={() => setIssued(null)}>I have saved it</Button>}
+      >
+        <div className="space-y-4">
+          <div className="rounded-xl border border-brand-500/30 bg-brand-500/8 p-4">
+            <code className="block break-all font-mono text-[0.8rem] text-ink-50">{issued?.secret}</code>
+            <div className="mt-3">
+              <CopyButton text={issued?.secret ?? ''} label="Copy key" />
+            </div>
+          </div>
+          <p className="text-[0.78rem] leading-relaxed text-ink-400">
+            Scopes: {issued?.key.scopes.join(', ')}. Send it as{' '}
+            <code className="font-mono text-ink-200">Authorization: Bearer …</code> against{' '}
+            <code className="font-mono text-ink-200">{origin}/v1/…</code>
+          </p>
+        </div>
+      </Modal>
+
+      <Modal
+        open={revoking !== null}
+        onClose={() => setRevoking(null)}
+        title={`Revoke ${revoking?.name ?? ''}?`}
+        description="Anything using this key stops working the moment you confirm."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setRevoking(null)}>Keep it</Button>
+            <Button variant="danger" onClick={revoke} loading={busy}>Revoke key</Button>
+          </>
+        }
+      >
+        <p className="text-[0.82rem] leading-relaxed text-ink-400">
+          Revoking is permanent. To replace a key without downtime, rotate it instead — that issues
+          the new secret and retires the old one in a single step.
+        </p>
       </Modal>
     </>
   )

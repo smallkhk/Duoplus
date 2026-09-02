@@ -6,7 +6,7 @@ import { PhoneFrame } from '@/components/PhoneFrame'
 import { Badge, Button, Field, Input, Select, cx, useToast } from '@/components/ui'
 import { BRAND, STATS } from '@/data/site'
 import { useAuth } from '@/lib/auth'
-import { ApiError } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
 
 type Mode = 'login' | 'register'
 
@@ -17,6 +17,8 @@ function AuthShell({ mode }: { mode: Mode }) {
   const { user, ready, login, register, meta } = useAuth()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** Set once a reset has been requested, so the form can say what happens next. */
+  const [resetSent, setResetSent] = useState<string | null>(null)
   const isLogin = mode === 'login'
 
   const destination = (location.state as { from?: string } | null)?.from ?? '/console'
@@ -27,6 +29,31 @@ function AuthShell({ mode }: { mode: Mode }) {
   useEffect(() => {
     if (ready && user) navigate(destination, { replace: true })
   }, [ready, user, destination, navigate])
+
+  /**
+   * Sends a reset for whatever is in the email box. The server answers the same
+   * way for an unknown address, so nothing here reveals who has an account.
+   */
+  const forgot = async () => {
+    const field = document.querySelector<HTMLInputElement>('input[name="email"]')
+    const email = field?.value.trim() ?? ''
+    if (!email.includes('@')) {
+      setError('Enter your email address above, then choose “Forgot password?” again.')
+      field?.focus()
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await api.forgotPassword(email)
+      setResetSent(result.delivery)
+      toast(result.message, 'ok')
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not start a password reset.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -161,7 +188,7 @@ function AuthShell({ mode }: { mode: Mode }) {
                   </label>
                   <button
                     type="button"
-                    onClick={() => toast('Password reset is not wired up yet — email support to reset.', 'info')}
+                    onClick={() => void forgot()}
                     className="text-[0.8rem] text-brand-300 hover:text-brand-200"
                   >
                     Forgot password?
@@ -172,6 +199,20 @@ function AuthShell({ mode }: { mode: Mode }) {
               <Button type="submit" size="lg" className="w-full" disabled={busy} iconRight={busy ? undefined : 'arrowRight'}>
                 {busy ? 'One moment…' : isLogin ? 'Sign in' : 'Create account'}
               </Button>
+
+              {resetSent && (
+                <div className="rounded-lg border border-brand-500/30 bg-brand-500/8 p-3.5">
+                  <p className="text-[0.8rem] leading-relaxed text-ink-200">
+                    If that address has an account, a reset link is on its way.
+                  </p>
+                  {resetSent === 'server-log' && (
+                    <p className="mt-1.5 text-[0.75rem] leading-relaxed text-ink-400">
+                      This server has no mail transport configured, so the link was written to the
+                      server log instead. The operator can read it from there.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {isLogin && demoAvailable && (
                 <button

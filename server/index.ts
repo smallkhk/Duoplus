@@ -13,8 +13,8 @@ import express from 'express'
 import cookieParser from 'cookie-parser'
 
 import {
-  attachUser, clearSession, createUser, issueSession, requireAuth, validateRegistration,
-  verifyPassword,
+  actorRole, attachUser, clearSession, createUser, issueSession, requireAuth, requireRole,
+  validateRegistration, verifyPassword,
 } from './auth.js'
 import { cloudCall, upstreamConfigured } from './fleet.js'
 import {
@@ -26,6 +26,10 @@ import {
   type ChainId,
 } from './crypto.js'
 import { assistantConfigured, MODEL, PROVIDER_ID, PROVIDER_LABEL, runAssistant } from './assistant.js'
+import { resourceRoutes } from './routes-resources.js'
+import {
+  InputError, acceptInvite, consumeResetToken, findInvite, issueResetToken, userForApiKey,
+} from './resources.js'
 import { DEMO_EMAIL, grantTrialPhone, seed } from './seed.js'
 import {
   db, findUserByEmail, mutate, nowIso, prefixedId, publicUser, type SupportThread,
@@ -53,6 +57,9 @@ app.get('/api/meta', (_req, res) => {
       provider_label: PROVIDER_LABEL,
     },
     cloud: { upstream: upstreamConfigured() },
+    /* Whether a mail transport exists, so the console never promises an email
+     * it cannot send. */
+    mail: { configured: Boolean(process.env.MADOVA_SMTP_URL) },
     /* Whether the seeded demo account is still present, so the sign-in page can
      * offer it only when it exists. */
     demo_account: {
@@ -102,8 +109,125 @@ app.post('/api/auth/logout', (_req, res) => {
 })
 
 app.get('/api/auth/me', (req, res) => {
-  if (!req.user) return res.json(envelope({ user: null }))
-  res.json(envelope({ user: publicUser(req.user), account: accountSummary(req.user.id) }))
+  if (!req.user || !req.actor) return res.json(envelope({ user: null }))
+  res.json(envelope({
+    /* The signed-in person, and the account they act inside — the same record
+     * for an owner, different ones for a team member. */
+    user: publicUser(req.actor),
+    account: accountSummary(req.user.id),
+    role: actorRole(req),
+    account_owner: req.actor.parent_id
+      ? { name: req.user.name, company: req.user.company }
+      : null,
+  }))
+})
+
+/* ------------------------------ invitations ----------------------------- */
+
+/** What the join page needs to render before anyone types a password. */
+app.get('/api/auth/invite', (req, res) => {
+  const found = findInvite(String(req.query.token ?? ''))
+  if (!found) return errorOut(res, 404, 'That invitation is not valid or has already been used.')
+  res.json(envelope({
+    invite: {
+      name: found.member.name,
+      email: found.member.email,
+      role: found.member.role,
+      company: found.owner.company || found.owner.name,
+    },
+  }))
+})
+
+app.post('/api/auth/join', (req, res) => {
+  try {
+    const { user } = acceptInvite(String(req.body?.token ?? ''), String(req.body?.password ?? ''))
+    issueSession(res, user.id)
+    res.json(envelope({ user: publicUser(user) }))
+  } catch (err) {
+    const status = err instanceof InputError ? err.status : 400
+    errorOut(res, status, err instanceof Error ? err.message : 'Could not accept that invitation')
+  }
+})
+
+/* --------------------------- password recovery -------------------------- */
+
+/**
+ * Always answers the same way, whether or not the address is on file: telling
+ * an anonymous caller which emails exist is an account-enumeration hole.
+ *
+ * Where no mail transport is configured the link is written to the server log
+ * instead of being sent, so a self-hosted install still has a way through.
+ */
+app.post('/api/auth/forgot', (req, res) => {
+  const email = String(req.body?.email ?? '')
+  const issued = issueResetToken(email)
+  if (issued) {
+    const base = process.env.MADOVA_PUBLIC_URL ?? ''
+    const link = `${base}/reset?token=${encodeURIComponent(issued.token)}`
+    console.log(`[reset] ${issued.user.email} → ${link}`)
+  }
+  res.json(envelope({
+    ok: true,
+    message: 'If that address has an account, a reset link is on its way.',
+    /* Without mail configured the operator reads the link from the log. */
+    delivery: process.env.MADOVA_SMTP_URL ? 'email' : 'server-log',
+  }))
+})
+
+app.post('/api/auth/reset', (req, res) => {
+  try {
+    const { user } = consumeResetToken(String(req.body?.token ?? ''), String(req.body?.password ?? ''))
+    issueSession(res, user.id)
+    res.json(envelope({ user: publicUser(user) }))
+  } catch (err) {
+    const status = err instanceof InputError ? err.status : 400
+    errorOut(res, status, err instanceof Error ? err.message : 'Could not reset that password')
+  }
+})
+
+/* ------------------------------ public API ------------------------------ */
+
+/**
+ * The surface an API key buys. Same engine as the console — a key calls the
+ * exact functions the UI calls — but authenticated by bearer token and gated
+ * on the scopes the key was minted with.
+ */
+const SCOPE_FOR_PATH: Record<string, string> = {
+  '/api/v1/cloudPhone/list': 'phones:read',
+  '/api/v1/cloudPhone/groupList': 'phones:read',
+  '/api/v1/proxy/list': 'phones:read',
+  '/api/v1/app/list': 'phones:read',
+  '/api/v1/cloudNumber/smsList': 'phones:read',
+  '/api/v1/cloudPhone/batchPowerOn': 'phones:write',
+  '/api/v1/cloudPhone/batchPowerOff': 'phones:write',
+  '/api/v1/cloudPhone/batchRestart': 'phones:write',
+  '/api/v1/cloudPhone/batchRoot': 'phones:write',
+  '/api/v1/cloudPhone/update': 'phones:write',
+  '/api/v1/cloudPhone/command': 'phones:write',
+  '/api/v1/cloudPhone/renewal': 'orders:write',
+  '/api/v1/app/batchInstall': 'apps:write',
+  '/api/v1/cloudDrive/push': 'apps:write',
+}
+
+app.post(/^\/v1\/.+/, async (req, res) => {
+  const header = req.get('authorization') ?? ''
+  const key = header.toLowerCase().startsWith('bearer ')
+    ? header.slice(7).trim()
+    : (req.get('x-madova-key') ?? '').trim()
+  if (!key) return errorOut(res, 401, 'Send your API key as `Authorization: Bearer mdv_live_…`')
+
+  const holder = userForApiKey(key)
+  if (!holder) return errorOut(res, 401, 'That API key is not valid or has been revoked.')
+
+  const path = `/api${req.path}`
+  const needed = SCOPE_FOR_PATH[path]
+  if (!needed) return errorOut(res, 404, `Unknown endpoint: ${req.path}`)
+  if (!holder.key.scopes.includes(needed)) {
+    return errorOut(res, 403, `This key does not carry the "${needed}" scope.`)
+  }
+
+  const reply = await cloudCall(holder.user, path, req.body ?? {}, String(req.get('lang') ?? 'en'))
+  res.status(reply.code === 200 ? 200 : reply.code).json(reply)
 })
 
 /* ---------------------------- device control ---------------------------- */
@@ -113,8 +237,22 @@ app.get('/api/auth/me', (req, res) => {
  * the server decides whether that resolves against the local engine or the real
  * upstream, and the key never leaves this process.
  */
+app.use('/api', resourceRoutes)
+
+/* Read paths are open to the whole team; anything that moves a device is not. */
+const READ_ONLY_PATHS = new Set([
+  '/api/v1/cloudPhone/list',
+  '/api/v1/cloudPhone/groupList',
+  '/api/v1/proxy/list',
+  '/api/v1/app/list',
+  '/api/v1/cloudNumber/smsList',
+])
+
 app.post('/api/cloud', requireAuth, async (req, res) => {
   const callPath = String(req.body?.path ?? '')
+  if (!READ_ONLY_PATHS.has(callPath) && actorRole(req) === 'viewer') {
+    return errorOut(res, 403, 'Viewers can look at the fleet but not change it.')
+  }
   const body = (req.body?.body ?? {}) as Record<string, unknown>
   const lang = typeof req.body?.lang === 'string' ? req.body.lang : 'en'
   try {
@@ -135,7 +273,7 @@ function readQuantity(raw: unknown): number {
   return Number.isFinite(n) ? n : 1
 }
 
-app.post('/api/quote', requireAuth, (req, res) => {
+app.post('/api/quote', requireRole('owner'), (req, res) => {
   res.json(envelope(quote({
     quantity: readQuantity(req.body?.quantity),
     duration_days: Number(req.body?.duration_days) || 30,
@@ -149,7 +287,7 @@ app.get('/api/orders', requireAuth, (req, res) => {
   res.json(envelope({ orders: ordersOf(req.user!.id) }))
 })
 
-app.post('/api/orders', requireAuth, (req, res) => {
+app.post('/api/orders', requireRole('owner'), (req, res) => {
   const input = {
     quantity: readQuantity(req.body?.quantity),
     duration_days: Number(req.body?.duration_days) || 30,
@@ -172,7 +310,7 @@ app.get('/api/orders/:id', requireAuth, (req, res) => {
 })
 
 /** Settle from account credit. On-chain orders settle through /payment instead. */
-app.post('/api/orders/:id/pay', requireAuth, (req, res) => {
+app.post('/api/orders/:id/pay', requireRole('owner'), (req, res) => {
   const result = payOrder(req.user!, req.params.id)
   if ('error' in result) return errorOut(res, 400, result.error)
   res.json(envelope({ order: result.order, provisioned: result.provisioned }))
@@ -181,7 +319,7 @@ app.post('/api/orders/:id/pay', requireAuth, (req, res) => {
 /* ----------------------------- crypto checkout ---------------------------- */
 
 /** Create the on-chain invoice: address, exact amount, QR and deadline. */
-app.post('/api/orders/:id/payment', requireAuth, async (req, res) => {
+app.post('/api/orders/:id/payment', requireRole('owner'), async (req, res) => {
   const chain = String(req.body?.chain ?? '') as ChainId
   if (!enabledChains().includes(chain)) {
     return errorOut(res, 400, 'That payment network is not available on this server')
@@ -231,7 +369,7 @@ app.get('/api/orders/:id/payment', requireAuth, async (req, res) => {
   res.json(envelope({ payment: fresh.payment, order: fresh, provisioned, check: result.state }))
 })
 
-app.post('/api/orders/:id/cancel', requireAuth, (req, res) => {
+app.post('/api/orders/:id/cancel', requireRole('owner'), (req, res) => {
   if (!cancelOrder(req.user!, req.params.id)) return errorOut(res, 400, 'That order cannot be cancelled')
   res.json(envelope({ ok: true }))
 })
@@ -360,7 +498,7 @@ const distDir = process.env.MADOVA_STATIC_DIR ?? path.join(process.cwd(), 'dist'
 app.use(express.static(distDir, { index: false }))
 
 /* The SPA owns client-side routing; anything not an API path falls through. */
-app.get(/^(?!\/api\/).*/, (_req, res, next) => {
+app.get(/^(?!\/(api|v1)\/).*/, (_req, res, next) => {
   res.sendFile(path.join(distDir, 'index.html'), (err) => err && next())
 })
 

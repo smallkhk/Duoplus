@@ -1,11 +1,12 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { PageHeader } from '@/components/ConsoleLayout'
 import { Icon } from '@/components/Icon'
-import { Badge, Button, Card, Field, Input, Modal, Select, useToast } from '@/components/ui'
-import { TEAM } from '@/data/demo'
-import type { TeamMember } from '@/lib/duoplus/types'
+import {
+  Badge, Button, Card, CopyButton, Field, Input, Modal, Select, Skeleton, useToast,
+} from '@/components/ui'
+import { api, ApiError, type MemberRecord } from '@/lib/api'
 
-const ROLE_TONE: Record<TeamMember['role'], 'brand' | 'accent' | 'neutral'> = {
+const ROLE_TONE: Record<MemberRecord['role'], 'brand' | 'accent' | 'neutral'> = {
   Owner: 'brand', Admin: 'accent', Operator: 'neutral', Viewer: 'neutral',
 }
 
@@ -19,9 +20,77 @@ const PERMISSIONS = [
   ['View the fleet', ['Owner', 'Admin', 'Operator', 'Viewer']],
 ] as const
 
+const BLANK = { name: '', email: '', role: 'Operator' }
+
 export function Team() {
   const toast = useToast()
+  const [team, setTeam] = useState<MemberRecord[] | null>(null)
+  const [roles, setRoles] = useState<MemberRecord['role'][]>(['Admin', 'Operator', 'Viewer'])
+
   const [open, setOpen] = useState(false)
+  const [form, setForm] = useState(BLANK)
+  const [editing, setEditing] = useState<MemberRecord | null>(null)
+  const [removing, setRemoving] = useState<MemberRecord | null>(null)
+  const [busy, setBusy] = useState(false)
+  /** Set once an invite is created, so the link can be handed over directly. */
+  const [invite, setInvite] = useState<{ member: MemberRecord; token: string } | null>(null)
+
+  const load = useCallback(() => {
+    api.team()
+      .then((d) => { setTeam(d.team); setRoles(d.roles) })
+      .catch(() => setTeam([]))
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  const send = async () => {
+    setBusy(true)
+    try {
+      const result = await api.inviteMember(form)
+      setInvite({ member: result.member, token: result.invite_token })
+      setOpen(false)
+      setForm(BLANK)
+      load()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not send that invitation.', 'danger')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const saveMember = async () => {
+    if (!editing) return
+    setBusy(true)
+    try {
+      await api.updateMember(editing.id, { role: editing.role, status: editing.status })
+      toast(`${editing.name} updated.`, 'ok')
+      setEditing(null)
+      load()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not update that member.', 'danger')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async () => {
+    if (!removing) return
+    setBusy(true)
+    try {
+      await api.removeMember(removing.id)
+      toast(`${removing.name} removed from the team.`, 'ok')
+      setRemoving(null)
+      setEditing(null)
+      load()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not remove that member.', 'danger')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const inviteLink = invite
+    ? `${window.location.origin}/join?invite=${encodeURIComponent(invite.token)}`
+    : ''
 
   return (
     <>
@@ -45,12 +114,18 @@ export function Team() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-800">
-                {TEAM.map((m) => (
+                {team === null && Array.from({ length: 3 }, (_, i) => (
+                  <tr key={i}>{Array.from({ length: 5 }, (_, j) => (
+                    <td key={j} className="px-5 py-4"><Skeleton className="h-4 w-full" /></td>
+                  ))}</tr>
+                ))}
+
+                {team?.map((m) => (
                   <tr key={m.id} className="transition-colors hover:bg-ink-800/40">
                     <td className="px-5 py-3.5">
                       <span className="flex items-center gap-3">
                         <span className="grid size-8 shrink-0 place-items-center rounded-full bg-gradient-to-br from-brand-500 to-accent-500 text-[0.66rem] font-semibold text-white">
-                          {m.name.split(' ').map((n) => n[0]).join('')}
+                          {m.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
                         </span>
                         <span className="min-w-0">
                           <span className="block truncate font-medium text-ink-100">{m.name}</span>
@@ -69,13 +144,17 @@ export function Team() {
                     </td>
                     <td className="px-5 py-3.5">
                       <div className="flex justify-end">
-                        <button
-                          onClick={() => toast('Editing members is not wired up in this demo build.', 'info')}
-                          className="rounded-lg p-1.5 text-ink-500 hover:bg-ink-800 hover:text-ink-100"
-                          aria-label={`Manage ${m.name}`}
-                        >
-                          <Icon name="settings" className="size-3.5" />
-                        </button>
+                        {m.role === 'Owner' ? (
+                          <span className="pr-1.5 text-[0.7rem] text-ink-600">account owner</span>
+                        ) : (
+                          <button
+                            onClick={() => setEditing(m)}
+                            className="rounded-lg p-1.5 text-ink-500 hover:bg-ink-800 hover:text-ink-100"
+                            aria-label={`Manage ${m.name}`}
+                          >
+                            <Icon name="settings" className="size-3.5" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -110,26 +189,111 @@ export function Team() {
         footer={
           <>
             <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={() => { setOpen(false); toast('Invitations are not wired up in this demo build.', 'info') }}>
-              Send invitation
+            <Button
+              onClick={send}
+              loading={busy}
+              disabled={form.name.trim().length < 2 || !form.email.includes('@')}
+            >
+              Create invitation
             </Button>
           </>
         }
       >
         <div className="space-y-5">
-          <Field label="Work email"><Input type="email" placeholder="colleague@company.com" /></Field>
-          <Field label="Role" hint="Operators can drive phones but cannot provision or bill.">
-            <Select defaultValue="Operator">
-              {['Admin', 'Operator', 'Viewer'].map((r) => <option key={r}>{r}</option>)}
-            </Select>
+          <Field label="Name">
+            <Input
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="Ada Lovelace"
+              autoFocus
+            />
           </Field>
-          <Field label="Scope" hint="Limit what they can see to a single group if you want.">
-            <Select defaultValue="all">
-              <option value="all">The whole fleet</option>
-              <option value="group">One group only</option>
+          <Field label="Work email">
+            <Input
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+              placeholder="colleague@company.com"
+            />
+          </Field>
+          <Field label="Role" hint="Operators can drive phones but cannot provision or bill.">
+            <Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+              {roles.map((r) => <option key={r}>{r}</option>)}
             </Select>
           </Field>
         </div>
+      </Modal>
+
+      <Modal
+        open={invite !== null}
+        onClose={() => setInvite(null)}
+        title={`${invite?.member.name ?? ''} is invited`}
+        description="No mail transport is configured on this server, so hand them the link yourself."
+        footer={<Button onClick={() => setInvite(null)}>Done</Button>}
+      >
+        <div className="space-y-4">
+          <div className="rounded-xl border border-brand-500/30 bg-brand-500/8 p-4">
+            <code className="block break-all font-mono text-[0.76rem] text-ink-50">{inviteLink}</code>
+            <div className="mt-3"><CopyButton text={inviteLink} label="Copy invite link" /></div>
+          </div>
+          <p className="text-[0.78rem] leading-relaxed text-ink-400">
+            They join as {invite?.member.role} and pick their own password. The invitation stays
+            pending on the team list until they do.
+          </p>
+        </div>
+      </Modal>
+
+      <Modal
+        open={editing !== null}
+        onClose={() => setEditing(null)}
+        title={`Manage ${editing?.name ?? ''}`}
+        description={editing?.email}
+        footer={
+          <>
+            <Button variant="danger" onClick={() => setRemoving(editing)}>Remove</Button>
+            <span className="flex-1" />
+            <Button variant="ghost" onClick={() => setEditing(null)}>Cancel</Button>
+            <Button onClick={saveMember} loading={busy}>Save changes</Button>
+          </>
+        }
+      >
+        <div className="space-y-5">
+          <Field label="Role">
+            <Select
+              value={editing?.role ?? 'Viewer'}
+              onChange={(e) => editing && setEditing({ ...editing, role: e.target.value as MemberRecord['role'] })}
+            >
+              {roles.map((r) => <option key={r}>{r}</option>)}
+            </Select>
+          </Field>
+          <Field label="Access" hint="Suspending keeps the record but blocks sign-in.">
+            <Select
+              value={editing?.status ?? 'active'}
+              onChange={(e) => editing && setEditing({ ...editing, status: e.target.value as MemberRecord['status'] })}
+            >
+              <option value="active">Active</option>
+              <option value="suspended">Suspended</option>
+              {editing?.status === 'invited' && <option value="invited">Invite pending</option>}
+            </Select>
+          </Field>
+        </div>
+      </Modal>
+
+      <Modal
+        open={removing !== null}
+        onClose={() => setRemoving(null)}
+        title={`Remove ${removing?.name ?? ''}?`}
+        description="They lose access immediately. Devices and groups are untouched."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setRemoving(null)}>Keep them</Button>
+            <Button variant="danger" onClick={remove} loading={busy}>Remove member</Button>
+          </>
+        }
+      >
+        <p className="text-[0.82rem] leading-relaxed text-ink-400">
+          You can invite them again later; it will be a fresh invitation.
+        </p>
       </Modal>
     </>
   )

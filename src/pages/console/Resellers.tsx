@@ -1,12 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '@/components/ConsoleLayout'
 import { BarList } from '@/components/Charts'
 import { Icon } from '@/components/Icon'
 import {
-  Badge, Button, Card, Field, Input, Modal, Select, Tabs, cx, useToast,
+  Badge, Button, Card, Field, Input, Modal, Select, Skeleton, Tabs, cx, useToast,
 } from '@/components/ui'
-import { SUB_ACCOUNTS } from '@/data/demo'
-import type { SubAccount } from '@/lib/duoplus/types'
+import { api, ApiError, type SubAccountRecord as SubAccount } from '@/lib/api'
 
 const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 const num = (n: number) => n.toLocaleString('en-US')
@@ -17,20 +16,101 @@ const STATUS_TONE: Record<SubAccount['status'], 'ok' | 'brand' | 'warn' | 'neutr
 
 type Filter = 'all' | SubAccount['status']
 
+const BLANK = {
+  company: '', contact: '', email: '', plan: 'Starter',
+  minutes_quota: '50000', mrr: '0', margin: '35',
+}
+
 export function Resellers() {
   const toast = useToast()
+  const [accounts, setAccounts] = useState<SubAccount[] | null>(null)
+  const [plans, setPlans] = useState<string[]>(['Starter', 'Growth', 'Scale', 'Enterprise'])
   const [filter, setFilter] = useState<Filter>('all')
-  const [open, setOpen] = useState(false)
 
+  const [open, setOpen] = useState(false)
+  const [form, setForm] = useState(BLANK)
+  const [editing, setEditing] = useState<SubAccount | null>(null)
+  const [removing, setRemoving] = useState<SubAccount | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(() => {
+    api.subAccounts()
+      .then((d) => { setAccounts(d.sub_accounts); setPlans(d.plans) })
+      .catch(() => setAccounts([]))
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  const all = useMemo(() => accounts ?? [], [accounts])
   const rows = useMemo(
-    () => filter === 'all' ? SUB_ACCOUNTS : SUB_ACCOUNTS.filter((a) => a.status === filter),
-    [filter],
+    () => (filter === 'all' ? all : all.filter((a) => a.status === filter)),
+    [all, filter],
   )
 
-  const active = SUB_ACCOUNTS.filter((a) => a.status === 'active')
-  const mrr = SUB_ACCOUNTS.reduce((s, a) => s + a.mrr, 0)
-  const margin = SUB_ACCOUNTS.reduce((s, a) => s + a.mrr * a.margin, 0)
-  const phones = SUB_ACCOUNTS.reduce((s, a) => s + a.phones, 0)
+  const active = all.filter((a) => a.status === 'active')
+  const mrr = all.reduce((s, a) => s + a.mrr, 0)
+  /* margin is stored as whole percent, so scale it back to a fraction for money maths. */
+  const margin = all.reduce((s, a) => s + a.mrr * (a.margin / 100), 0)
+  const phones = all.reduce((s, a) => s + a.phones, 0)
+
+  const create = async () => {
+    setBusy(true)
+    try {
+      const { sub_account } = await api.createSubAccount({
+        company: form.company,
+        contact: form.contact,
+        email: form.email,
+        plan: form.plan,
+        minutes_quota: Number(form.minutes_quota),
+        mrr: Number(form.mrr),
+        margin: Number(form.margin),
+      })
+      toast(`${sub_account.company} created.`, 'ok')
+      setOpen(false)
+      setForm(BLANK)
+      load()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not create that sub-account.', 'danger')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const saveEdit = async () => {
+    if (!editing) return
+    setBusy(true)
+    try {
+      await api.updateSubAccount(editing.id, {
+        plan: editing.plan,
+        status: editing.status,
+        minutes_quota: editing.minutes_quota,
+        mrr: editing.mrr,
+        margin: editing.margin,
+      })
+      toast(`${editing.company} saved.`, 'ok')
+      setEditing(null)
+      load()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not save that sub-account.', 'danger')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async () => {
+    if (!removing) return
+    setBusy(true)
+    try {
+      await api.deleteSubAccount(removing.id)
+      toast(`${removing.company} removed.`, 'ok')
+      setRemoving(null)
+      setEditing(null)
+      load()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not remove that sub-account.', 'danger')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <>
@@ -39,10 +119,13 @@ export function Resellers() {
         lead="Customers reselling MADOVA capacity under your brand. Each has its own console, users and quota, and none of them can see another."
         actions={
           <>
-            <Button variant="secondary" size="sm" icon="download"
-              onClick={() => toast('CSV export is not wired up in this demo build.', 'info')}>
+            <a
+              href="/api/sub-accounts.csv"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[0.8rem] font-medium text-ink-100 ring-1 ring-inset ring-ink-700 transition-colors hover:bg-ink-800/70"
+            >
+              <Icon name="download" className="size-4" />
               Export CSV
-            </Button>
+            </a>
             <Button size="sm" icon="plus" onClick={() => setOpen(true)}>New sub-account</Button>
           </>
         }
@@ -50,10 +133,10 @@ export function Resellers() {
 
       <div className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[
-          ['Sub-accounts', String(SUB_ACCOUNTS.length), `${active.length} active`, 'building'],
+          ['Sub-accounts', String(all.length), `${active.length} active`, 'building'],
           ['Phones resold', num(phones), 'across all customers', 'phone'],
           ['Monthly revenue', money(mrr), 'billed to your customers', 'wallet'],
-          ['Your margin', money(Math.round(margin)), `${Math.round((margin / mrr) * 100)}% blended`, 'chart'],
+          ['Your margin', money(Math.round(margin)), mrr > 0 ? `${Math.round((margin / mrr) * 100)}% blended` : 'no revenue yet', 'chart'],
         ].map(([label, value, foot, icon]) => (
           <Card key={label} className="p-5">
             <div className="flex items-start justify-between gap-3">
@@ -76,10 +159,10 @@ export function Resellers() {
               value={filter}
               onChange={setFilter}
               tabs={[
-                { id: 'all', label: 'All', count: SUB_ACCOUNTS.length },
+                { id: 'all', label: 'All', count: all.length },
                 { id: 'active', label: 'Active', count: active.length },
-                { id: 'trial', label: 'Trial', count: SUB_ACCOUNTS.filter((a) => a.status === 'trial').length },
-                { id: 'past_due', label: 'Past due', count: SUB_ACCOUNTS.filter((a) => a.status === 'past_due').length },
+                { id: 'trial', label: 'Trial', count: all.filter((a) => a.status === 'trial').length },
+                { id: 'past_due', label: 'Past due', count: all.filter((a) => a.status === 'past_due').length },
               ]}
             />
           </div>
@@ -94,11 +177,28 @@ export function Resellers() {
                   <th className="px-5 py-3 font-medium">MRR</th>
                   <th className="px-5 py-3 font-medium">Margin</th>
                   <th className="px-5 py-3 font-medium">Status</th>
+                  <th className="px-5 py-3 font-medium"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-800">
+                {accounts === null && Array.from({ length: 4 }, (_, i) => (
+                  <tr key={i}>{Array.from({ length: 8 }, (_, j) => (
+                    <td key={j} className="px-5 py-4"><Skeleton className="h-4 w-full" /></td>
+                  ))}</tr>
+                ))}
+
+                {accounts !== null && rows.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-5 py-10 text-center text-[0.82rem] text-ink-500">
+                      {all.length === 0
+                        ? 'No sub-accounts yet.'
+                        : 'No sub-accounts match that filter.'}
+                    </td>
+                  </tr>
+                )}
+
                 {rows.map((a) => {
-                  const pct = Math.round((a.minutes_used / a.minutes_quota) * 100)
+                  const pct = a.minutes_quota > 0 ? Math.round((a.minutes_used / a.minutes_quota) * 100) : 0
                   return (
                     <tr key={a.id} className="transition-colors hover:bg-ink-800/40">
                       <td className="px-5 py-3.5">
@@ -119,9 +219,20 @@ export function Resellers() {
                         </div>
                       </td>
                       <td className="px-5 py-3.5 font-mono text-ink-100">{money(a.mrr)}</td>
-                      <td className="px-5 py-3.5 font-mono text-ok">{Math.round(a.margin * 100)}%</td>
+                      <td className="px-5 py-3.5 font-mono text-ok">{a.margin}%</td>
                       <td className="px-5 py-3.5">
                         <Badge tone={STATUS_TONE[a.status]}>{a.status.replace('_', ' ')}</Badge>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex justify-end">
+                          <button
+                            onClick={() => setEditing(a)}
+                            className="rounded-lg p-1.5 text-ink-500 hover:bg-ink-800 hover:text-ink-100"
+                            aria-label={`Manage ${a.company}`}
+                          >
+                            <Icon name="settings" className="size-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )
@@ -135,18 +246,27 @@ export function Resellers() {
           <Card className="p-6">
             <h2 className="text-[0.9rem] font-semibold text-ink-50">Revenue by customer</h2>
             <p className="mt-1 mb-5 text-[0.76rem] text-ink-400">Monthly recurring, this period.</p>
-            <BarList
-              data={[...SUB_ACCOUNTS].sort((a, b) => b.mrr - a.mrr).slice(0, 6)
-                .map((a) => ({ label: a.company, value: a.mrr }))}
-              valueFormat={money}
-            />
+            {all.length === 0 ? (
+              <p className="text-[0.8rem] text-ink-500">Nothing to chart yet.</p>
+            ) : (
+              <BarList
+                data={[...all].sort((a, b) => b.mrr - a.mrr).slice(0, 6)
+                  .map((a) => ({ label: a.company, value: a.mrr }))}
+                valueFormat={money}
+              />
+            )}
           </Card>
 
           <Card className="p-6">
             <h2 className="text-[0.9rem] font-semibold text-ink-50">Needs attention</h2>
             <ul className="mt-4 space-y-3">
-              {SUB_ACCOUNTS
-                .filter((a) => a.status === 'past_due' || a.minutes_used / a.minutes_quota > 0.92)
+              {all.filter((a) => a.status === 'past_due'
+                || (a.minutes_quota > 0 && a.minutes_used / a.minutes_quota > 0.92)).length === 0 && (
+                <li className="text-[0.8rem] text-ink-500">Nothing needs chasing right now.</li>
+              )}
+              {all
+                .filter((a) => a.status === 'past_due'
+                  || (a.minutes_quota > 0 && a.minutes_used / a.minutes_quota > 0.92))
                 .map((a) => (
                   <li key={a.id} className="flex items-start gap-2.5 rounded-lg bg-ink-950/60 p-3 ring-1 ring-inset ring-ink-800">
                     <Icon name="alert" className="mt-0.5 size-3.5 shrink-0 text-warn" />
@@ -173,7 +293,11 @@ export function Resellers() {
         footer={
           <>
             <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={() => { setOpen(false); toast('Sub-account creation is not wired up in this demo build.', 'info') }}>
+            <Button
+              onClick={create}
+              loading={busy}
+              disabled={form.company.trim().length < 2 || form.contact.trim().length < 2 || !form.email.includes('@')}
+            >
               Create sub-account
             </Button>
           </>
@@ -181,26 +305,133 @@ export function Resellers() {
       >
         <div className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Company"><Input placeholder="Northwind Media" /></Field>
-            <Field label="Primary contact email"><Input type="email" placeholder="ops@northwind.media" /></Field>
+            <Field label="Company">
+              <Input
+                value={form.company}
+                onChange={(e) => setForm({ ...form, company: e.target.value })}
+                placeholder="Northwind Media"
+                autoFocus
+              />
+            </Field>
+            <Field label="Primary contact">
+              <Input
+                value={form.contact}
+                onChange={(e) => setForm({ ...form, contact: e.target.value })}
+                placeholder="Rae Okonjo"
+              />
+            </Field>
           </div>
+          <Field label="Contact email">
+            <Input
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+              placeholder="ops@northwind.media"
+            />
+          </Field>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Plan">
-              <Select defaultValue="Growth">
-                {['Starter', 'Growth', 'Scale'].map((p) => <option key={p}>{p}</option>)}
+              <Select value={form.plan} onChange={(e) => setForm({ ...form, plan: e.target.value })}>
+                {plans.map((p) => <option key={p}>{p}</option>)}
               </Select>
             </Field>
-            <Field label="Phone quota"><Input type="number" defaultValue={200} /></Field>
+            <Field label="Monthly revenue" hint="What you bill them, in whole dollars.">
+              <Input
+                type="number"
+                value={form.mrr}
+                onChange={(e) => setForm({ ...form, mrr: e.target.value })}
+              />
+            </Field>
           </div>
           <Field label="Minute quota per month" hint="Hard cap — the sub-account cannot exceed it.">
-            <Input type="number" defaultValue={90000} />
+            <Input
+              type="number"
+              value={form.minutes_quota}
+              onChange={(e) => setForm({ ...form, minutes_quota: e.target.value })}
+            />
           </Field>
-          <Field label="Your markup over wholesale">
-            <Select defaultValue="60">
-              {[30, 45, 60, 80, 100].map((m) => <option key={m} value={m}>{m}%</option>)}
+          <Field label="Your margin over wholesale">
+            <Select value={form.margin} onChange={(e) => setForm({ ...form, margin: e.target.value })}>
+              {[20, 30, 35, 45, 60, 80].map((m) => <option key={m} value={m}>{m}%</option>)}
             </Select>
           </Field>
         </div>
+      </Modal>
+
+      <Modal
+        open={editing !== null}
+        onClose={() => setEditing(null)}
+        title={editing?.company ?? ''}
+        description={`${editing?.contact ?? ''} · ${editing?.email ?? ''}`}
+        footer={
+          <>
+            <Button variant="danger" onClick={() => setRemoving(editing)}>Remove</Button>
+            <span className="flex-1" />
+            <Button variant="ghost" onClick={() => setEditing(null)}>Cancel</Button>
+            <Button onClick={saveEdit} loading={busy}>Save changes</Button>
+          </>
+        }
+      >
+        <div className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Plan">
+              <Select
+                value={editing?.plan ?? ''}
+                onChange={(e) => editing && setEditing({ ...editing, plan: e.target.value })}
+              >
+                {plans.map((p) => <option key={p}>{p}</option>)}
+              </Select>
+            </Field>
+            <Field label="Status">
+              <Select
+                value={editing?.status ?? 'trial'}
+                onChange={(e) => editing && setEditing({ ...editing, status: e.target.value as SubAccount['status'] })}
+              >
+                {(['trial', 'active', 'past_due', 'churned'] as const).map((s) => (
+                  <option key={s} value={s}>{s.replace('_', ' ')}</option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Monthly revenue">
+              <Input
+                type="number"
+                value={editing?.mrr ?? 0}
+                onChange={(e) => editing && setEditing({ ...editing, mrr: Number(e.target.value) })}
+              />
+            </Field>
+            <Field label="Margin %">
+              <Input
+                type="number"
+                value={editing?.margin ?? 0}
+                onChange={(e) => editing && setEditing({ ...editing, margin: Number(e.target.value) })}
+              />
+            </Field>
+          </div>
+          <Field label="Minute quota per month">
+            <Input
+              type="number"
+              value={editing?.minutes_quota ?? 0}
+              onChange={(e) => editing && setEditing({ ...editing, minutes_quota: Number(e.target.value) })}
+            />
+          </Field>
+        </div>
+      </Modal>
+
+      <Modal
+        open={removing !== null}
+        onClose={() => setRemoving(null)}
+        title={`Remove ${removing?.company ?? ''}?`}
+        description="The customer record is deleted. Devices you provisioned for them are not."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setRemoving(null)}>Keep it</Button>
+            <Button variant="danger" onClick={remove} loading={busy}>Remove sub-account</Button>
+          </>
+        }
+      >
+        <p className="text-[0.82rem] leading-relaxed text-ink-400">This cannot be undone.</p>
       </Modal>
     </>
   )

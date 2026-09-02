@@ -8,7 +8,9 @@
  */
 import crypto from 'node:crypto'
 import type { NextFunction, Request, Response } from 'express'
-import { db, findUser, findUserByEmail, mutate, nowIso, prefixedId, type User } from './store.js'
+import {
+  db, findUser, findUserByEmail, mutate, nowIso, prefixedId, type User, type UserRole,
+} from './store.js'
 
 const SECRET = process.env.MADOVA_SESSION_SECRET ?? crypto.randomBytes(32).toString('hex')
 const COOKIE = 'madova_session'
@@ -25,11 +27,16 @@ export function hashPassword(password: string): { password_hash: string; passwor
   return { password_salt, password_hash: hash(password, password_salt) }
 }
 
-export function verifyPassword(password: string, user: User): boolean {
-  const candidate = Buffer.from(hash(password, user.password_salt), 'hex')
-  const expected = Buffer.from(user.password_hash, 'hex')
+/** Constant-time check of a secret against a stored hash and salt. */
+export function verifyHash(secret: string, storedHash: string, salt: string): boolean {
+  const candidate = Buffer.from(hash(secret, salt), 'hex')
+  const expected = Buffer.from(storedHash, 'hex')
   if (candidate.length !== expected.length) return false
   return crypto.timingSafeEqual(candidate, expected)
+}
+
+export function verifyPassword(password: string, user: User): boolean {
+  return verifyHash(password, user.password_hash, user.password_salt)
 }
 
 function sign(payload: string): string {
@@ -70,16 +77,54 @@ declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
+      /**
+       * The account the request operates on. For a team member this is the
+       * owner, so every resource lookup finds the fleet they were invited to.
+       */
       user?: User
+      /** Who is actually signed in. Differs from `user` only for team members. */
+      actor?: User
     }
   }
 }
 
-/** Attaches req.user when a valid session cookie is present. Never rejects. */
+/**
+ * Attaches req.actor (who signed in) and req.user (whose account they act on).
+ * Never rejects — routes decide what needs a session.
+ */
 export function attachUser(req: Request, _res: Response, next: NextFunction) {
-  const user = readSession(req)
-  if (user) req.user = user
+  const actor = readSession(req)
+  if (actor) {
+    req.actor = actor
+    req.user = actor.parent_id ? findUser(actor.parent_id) ?? actor : actor
+  }
   next()
+}
+
+/** The role the signed-in person holds on the account they are acting inside. */
+export function actorRole(req: Request): UserRole {
+  return req.actor?.parent_id ? req.actor.role : 'owner'
+}
+
+const RANK: Record<UserRole, number> = { viewer: 0, operator: 1, admin: 2, owner: 3 }
+
+/** Gate a route on a minimum role. Owners always pass. */
+export function requireRole(min: UserRole) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      res.status(401).json({ code: 401, data: null, message: 'Sign in to continue' })
+      return
+    }
+    if (RANK[actorRole(req)] < RANK[min]) {
+      res.status(403).json({
+        code: 403,
+        data: null,
+        message: `This needs the ${min} role. You are signed in as ${actorRole(req)}.`,
+      })
+      return
+    }
+    next()
+  }
 }
 
 /** Rejects the request when there is no session. */

@@ -18,6 +18,8 @@ import { Legal } from '@/pages/marketing/Legal'
 import { NotFound } from '@/pages/marketing/NotFound'
 
 import { Login, Register } from '@/pages/auth/Auth'
+import { Join } from '@/pages/auth/Join'
+import { Reset } from '@/pages/auth/Reset'
 
 import { Overview } from '@/pages/console/Overview'
 import { Phones } from '@/pages/console/Phones'
@@ -57,6 +59,8 @@ export default function App() {
 
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/reset" element={<Reset />} />
+            <Route path="/join" element={<Join />} />
 
             <Route path="/console" element={<RequireAuth><ConsoleLayout /></RequireAuth>}>
               <Route index element={<Overview />} />

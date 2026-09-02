@@ -5,16 +5,32 @@ import { AreaChart, BarList, Donut, Heatmap } from '@/components/Charts'
 import { Icon } from '@/components/Icon'
 import { Badge, ButtonLink, Card, Dot, Skeleton, cx } from '@/components/ui'
 import { callData } from '@/lib/duoplus/client'
-import { AUTOMATIONS, REGION_INDEX, SUB_ACCOUNTS, USAGE_30D } from '@/data/demo'
+import { REGION_INDEX } from '@/data/demo'
+import { api, type OverviewData } from '@/lib/api'
 import { useProxies } from '@/lib/hooks'
 import { PHONE_STATUS_LABEL, PhoneStatus, type CloudPhone, type Paged } from '@/lib/duoplus/types'
 
 const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 const num = (n: number) => n.toLocaleString('en-US')
 
+/** Short weekday-and-day label for the usage chart. */
+const dayLabel = (iso: string) =>
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', timeZone: 'UTC',
+  })
+
 export function Overview() {
   const [phones, setPhones] = useState<CloudPhone[] | null>(null)
-  const proxies = useProxies()
+  const [summary, setSummary] = useState<OverviewData | null>(null)
+  const { proxies } = useProxies()
+
+  useEffect(() => {
+    let cancelled = false
+    api.overview()
+      .then((d) => { if (!cancelled) setSummary(d) })
+      .catch(() => { if (!cancelled) setSummary(null) })
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -59,10 +75,28 @@ export function Overview() {
     }, {}),
   ).sort((a, b) => b.value - a.value).slice(0, 6)
 
-  const minutesThisMonth = USAGE_30D.reduce((s, d) => s + d.minutes, 0)
-  const revenueThisMonth = SUB_ACCOUNTS.reduce((s, a) => s + a.mrr, 0)
+  const usage = summary?.usage_30d ?? []
+  const subAccounts = summary?.sub_accounts ?? []
+  const tasks = summary?.tasks ?? []
+  const minutesThisMonth = summary?.minutes_30d ?? 0
+  const revenueThisMonth = subAccounts.reduce((s, a) => s + a.mrr, 0)
   const proxyList = proxies ?? []
   const unhealthyProxies = proxyList.filter((p) => !p.healthy).length
+  /* A proxy nobody has checked is not "failing" — it is simply unknown. */
+  const checkedProxies = proxyList.filter((p) => p.latency_ms > 0 || p.healthy).length
+
+  /* Devices added in the last seven days, straight off their created_at. */
+  const weekAgo = Date.now() - 7 * 864e5
+  const addedThisWeek = (phones ?? []).filter(
+    (p) => Date.parse(p.created_at.replace(' ', 'T') + 'Z') >= weekAgo,
+  ).length
+
+  /* Consumption against the seven days before it, so the delta means something. */
+  const lastWeek = usage.slice(-7).reduce((s, u) => s + u.minutes, 0)
+  const priorWeek = usage.slice(-14, -7).reduce((s, u) => s + u.minutes, 0)
+  const weekDelta = priorWeek === 0
+    ? null
+    : Math.round(((lastWeek - priorWeek) / priorWeek) * 1000) / 10
 
   return (
     <>
@@ -81,34 +115,42 @@ export function Overview() {
         <Kpi
           label="Cloud phones"
           value={phones === null ? null : num(total)}
-          delta="+12 this week"
-          tone="ok"
+          delta={addedThisWeek > 0 ? `+${addedThisWeek} this week` : 'no change this week'}
+          tone={addedThisWeek > 0 ? 'ok' : 'neutral'}
           icon="phone"
           foot={`${byStatus(PhoneStatus.PoweredOn)} powered on right now`}
         />
         <Kpi
           label="Startup minutes · 30d"
           value={num(minutesThisMonth)}
-          delta="+8.4%"
-          tone="ok"
+          delta={weekDelta === null
+            ? `${num(lastWeek)} in the last 7 days`
+            : `${weekDelta >= 0 ? '+' : ''}${weekDelta}% week on week`}
+          tone={weekDelta === null ? 'neutral' : weekDelta > 0 ? 'ok' : 'neutral'}
           icon="clock"
           foot={`${money(minutesThisMonth * 0.0042)} at the metered rate`}
         />
         <Kpi
           label="Sub-account MRR"
           value={money(revenueThisMonth)}
-          delta="+3 accounts"
-          tone="ok"
+          delta={`${subAccounts.length} on the books`}
+          tone={subAccounts.length > 0 ? 'ok' : 'neutral'}
           icon="wallet"
-          foot={`${SUB_ACCOUNTS.filter((a) => a.status === 'active').length} active resellers`}
+          foot={`${subAccounts.filter((a) => a.status === 'active').length} active reseller${subAccounts.filter((a) => a.status === 'active').length === 1 ? '' : 's'}`}
         />
         <Kpi
           label="Proxy health"
           value={proxies === null ? null : `${proxyList.length - unhealthyProxies}/${proxyList.length}`}
-          delta={unhealthyProxies > 0 ? `${unhealthyProxies} failing` : 'all healthy'}
-          tone={unhealthyProxies > 0 ? 'warn' : 'ok'}
+          delta={proxyList.length === 0
+            ? 'none added'
+            : checkedProxies === 0
+              ? 'not checked yet'
+              : unhealthyProxies > 0 ? `${unhealthyProxies} failing` : 'all healthy'}
+          tone={proxyList.length === 0 || checkedProxies === 0
+            ? 'neutral'
+            : unhealthyProxies > 0 ? 'warn' : 'ok'}
           icon="route"
-          foot="Checked every 15 minutes"
+          foot={proxyList.length === 0 ? 'No proxies added' : 'Checked when you ask'}
         />
       </div>
 
@@ -121,12 +163,23 @@ export function Overview() {
             </div>
             <Badge tone="brand">30d</Badge>
           </div>
-          <AreaChart
-            data={USAGE_30D.map((d) => ({ label: d.label, value: d.minutes }))}
-            valueFormat={(n) => `${num(n)} min`}
-            label="minutes"
-            height={210}
-          />
+          {summary === null ? (
+            <Skeleton className="h-[210px] w-full" />
+          ) : minutesThisMonth === 0 ? (
+            <div className="grid h-[210px] place-items-center text-center">
+              <p className="max-w-xs text-[0.82rem] leading-relaxed text-ink-500">
+                Nothing consumed yet. Minutes are metered while a device is powered on, and appear
+                here the same day.
+              </p>
+            </div>
+          ) : (
+            <AreaChart
+              data={usage.map((d) => ({ label: dayLabel(d.date), value: d.minutes }))}
+              valueFormat={(n) => `${num(n)} min`}
+              label="minutes"
+              height={210}
+            />
+          )}
         </Card>
 
         <Card className="p-6">
@@ -165,15 +218,24 @@ export function Overview() {
             <Link to="/console/automation" className="text-[0.75rem] text-brand-300 hover:text-brand-200">View all</Link>
           </div>
           <ul className="mt-5 space-y-3">
-            {AUTOMATIONS.slice(0, 5).map((a) => (
+            {tasks.length === 0 && (
+              <li className="text-[0.8rem] text-ink-500">
+                No tasks yet.{' '}
+                <Link to="/console/automation" className="text-brand-300 hover:text-brand-200">
+                  Create one
+                </Link>.
+              </li>
+            )}
+            {tasks.slice(0, 5).map((a) => (
               <li key={a.id} className="flex items-center gap-3">
                 <Dot tone={a.status === 'running' ? 'ok' : a.status === 'failed' ? 'danger' : a.status === 'paused' ? 'neutral' : 'brand'} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[0.82rem] text-ink-100">{a.name}</span>
                   <span className="block truncate text-[0.7rem] text-ink-500">{a.trigger} · {a.targets} phones</span>
                 </span>
-                <span className={cx('shrink-0 font-mono text-[0.74rem]', a.success_rate > 0.9 ? 'text-ok' : 'text-warn')}>
-                  {Math.round(a.success_rate * 100)}%
+                <span className={cx('shrink-0 font-mono text-[0.74rem]',
+                  a.last_run === '—' ? 'text-ink-600' : a.success_rate > 90 ? 'text-ok' : 'text-warn')}>
+                  {a.last_run === '—' ? '—' : `${a.success_rate}%`}
                 </span>
               </li>
             ))}
@@ -184,7 +246,9 @@ export function Overview() {
           <h2 className="text-[0.95rem] font-semibold text-ink-50">Boot activity</h2>
           <p className="mt-1 mb-5 text-[0.78rem] text-ink-400">Power-ons per day, last 14 weeks.</p>
           <div className="overflow-x-auto pb-1">
-            <Heatmap />
+            {summary === null
+              ? <Skeleton className="h-[86px] w-full" />
+              : <Heatmap data={summary.boots_98d} />}
           </div>
           <div className="mt-4 flex items-center justify-between text-[0.68rem] text-ink-500">
             <span>Less</span>
@@ -229,8 +293,18 @@ export function Overview() {
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-800">
-              {SUB_ACCOUNTS.slice(0, 5).map((a) => {
-                const pct = Math.round((a.minutes_used / a.minutes_quota) * 100)
+              {subAccounts.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-6 py-8 text-center text-[0.82rem] text-ink-500">
+                    No sub-accounts yet.{' '}
+                    <Link to="/console/resellers" className="text-brand-300 hover:text-brand-200">
+                      Add your first customer
+                    </Link>.
+                  </td>
+                </tr>
+              )}
+              {subAccounts.slice(0, 5).map((a) => {
+                const pct = a.minutes_quota > 0 ? Math.round((a.minutes_used / a.minutes_quota) * 100) : 0
                 return (
                   <tr key={a.id} className="transition-colors hover:bg-ink-800/40">
                     <td className="px-6 py-3.5">
@@ -251,7 +325,7 @@ export function Overview() {
                       </div>
                     </td>
                     <td className="px-6 py-3.5 font-mono text-ink-100">{money(a.mrr)}</td>
-                    <td className="px-6 py-3.5 font-mono text-ok">{Math.round(a.margin * 100)}%</td>
+                    <td className="px-6 py-3.5 font-mono text-ok">{a.margin}%</td>
                     <td className="px-6 py-3.5">
                       <Badge tone={a.status === 'active' ? 'ok' : a.status === 'trial' ? 'brand' : a.status === 'past_due' ? 'warn' : 'neutral'}>
                         {a.status.replace('_', ' ')}
@@ -272,7 +346,7 @@ function Kpi({
   label, value, delta, tone, icon, foot,
 }: {
   label: string; value: string | null; delta: string
-  tone: 'ok' | 'warn' | 'danger'; icon: string; foot: string
+  tone: 'ok' | 'warn' | 'danger' | 'neutral'; icon: string; foot: string
 }) {
   return (
     <Card className="p-5">

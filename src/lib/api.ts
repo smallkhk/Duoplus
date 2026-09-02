@@ -46,6 +46,39 @@ export const apiGet = <T,>(path: string) => request<T>(path)
 export const apiPost = <T,>(path: string, body?: unknown) =>
   request<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}) })
 
+export const apiPatch = <T,>(path: string, body?: unknown) =>
+  request<T>(path, { method: 'PATCH', body: JSON.stringify(body ?? {}) })
+
+export const apiDelete = <T,>(path: string) => request<T>(path, { method: 'DELETE' })
+
+/** Upload raw bytes. The filename rides in a header so no multipart parser is needed. */
+export async function apiUpload<T>(path: string, file: File): Promise<T> {
+  let res: Response
+  try {
+    res = await fetch(path, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': file.type || 'application/octet-stream',
+        'X-MADOVA-Filename': encodeURIComponent(file.name),
+      },
+      body: file,
+    })
+  } catch {
+    throw new ApiError(0, 'Could not reach the MADOVA API. Is the server running?')
+  }
+  let payload: Envelope<T>
+  try {
+    payload = (await res.json()) as Envelope<T>
+  } catch {
+    throw new ApiError(res.status, res.status === 413
+      ? 'That file is larger than the upload limit.'
+      : `The server returned an unexpected response (${res.status}).`)
+  }
+  if (payload.code !== 200) throw new ApiError(payload.code, payload.message || 'Upload failed')
+  return payload.data
+}
+
 /* --------------------------------- types -------------------------------- */
 
 export interface SessionUser {
@@ -59,6 +92,20 @@ export interface SessionUser {
   minutes_balance: number
   credit_cents: number
   use_case: string
+  prefs?: UserPrefs
+}
+
+export interface UserPrefs {
+  timezone?: string
+  language?: string
+  notifications?: Record<string, boolean>
+  security?: Record<string, boolean>
+  brand?: {
+    display_name?: string
+    console_domain?: string
+    support_email?: string
+    accent?: string
+  }
 }
 
 export interface AccountSummary {
@@ -156,6 +203,7 @@ export interface ServerMeta {
     provider_label: string | null
   }
   cloud: { upstream: boolean }
+  mail: { configured: boolean }
   demo_account: { email: string; available: boolean }
   oauth: { providers: string[] }
   durations: number[]
@@ -186,12 +234,139 @@ export interface SupportThread {
   updated_at: string
 }
 
+/* --------------------------- resource records ---------------------------- */
+
+export interface ApiKeyRecord {
+  id: string
+  name: string
+  prefix: string
+  scopes: string[]
+  created_at: string
+  last_used_at?: string
+  revoked_at?: string
+  status: 'active' | 'revoked'
+}
+
+export interface ApiScope { id: string; label: string }
+
+export interface ProxyRecord {
+  id: string
+  name: string
+  host: string
+  port: string
+  user: string
+  area: string
+  group_ids: string[]
+  group_name: string[]
+  protocol: 'socks5' | 'http' | 'https'
+  latency_ms: number
+  checked_at: string
+  healthy: boolean
+}
+
+export interface GroupRecord { id: string; name: string; sort: number; remark: string }
+
+export interface FileRecord {
+  id: string
+  name: string
+  kind: 'apk' | 'image' | 'video' | 'archive' | 'other'
+  size: string
+  uploaded_at: string
+  pushed_to: number
+}
+
+export interface NumberRecord {
+  id: string
+  msisdn: string
+  country: string
+  operator: string
+  bound_image_id: string | null
+  bound_index?: number | null
+  expired_at: string
+  status: number
+}
+
+export interface SmsRecord { message: string; code: string; received_at: string }
+
+export interface TaskRecord {
+  id: string
+  name: string
+  trigger: string
+  action: string
+  group_id: string
+  targets: number
+  last_run: string
+  success_rate: number
+  status: 'running' | 'scheduled' | 'paused' | 'failed'
+}
+
+export interface MemberRecord {
+  id: string
+  name: string
+  email: string
+  role: 'Owner' | 'Admin' | 'Operator' | 'Viewer'
+  phones: number
+  last_active: string
+  status: 'active' | 'invited' | 'suspended'
+}
+
+export interface SubAccountRecord {
+  id: string
+  company: string
+  contact: string
+  email: string
+  plan: string
+  phones: number
+  minutes_used: number
+  minutes_quota: number
+  mrr: number
+  margin: number
+  status: 'active' | 'trial' | 'past_due' | 'churned'
+  since: string
+}
+
+export interface AppRecord {
+  package_name: string
+  name: string
+  version: string
+  size: string
+  installed_at: string
+  devices: number
+}
+
+export interface OverviewData {
+  phones: number
+  groups: number
+  proxies: number
+  apps: number
+  files: { bytes: number; count: number }
+  numbers: number
+  tasks: TaskRecord[]
+  team: number
+  sub_accounts: SubAccountRecord[]
+  regions: { region: string; area: string; flag: string; count: number }[]
+  usage_30d: { date: string; minutes: number; boots: number }[]
+  boots_98d: { date: string; boots: number }[]
+  minutes_30d: number
+}
+
+export interface BatchOutcome {
+  success: string[]
+  fail: string[]
+  fail_reason: Record<string, string>
+}
+
 /* -------------------------------- calls --------------------------------- */
 
 export const api = {
   meta: () => apiGet<ServerMeta>('/api/meta'),
 
-  me: () => apiGet<{ user: SessionUser | null; account?: AccountSummary }>('/api/auth/me'),
+  me: () => apiGet<{
+    user: SessionUser | null
+    account?: AccountSummary
+    role?: 'owner' | 'admin' | 'operator' | 'viewer'
+    account_owner?: { name: string; company: string } | null
+  }>('/api/auth/me'),
   login: (email: string, password: string) =>
     apiPost<{ user: SessionUser }>('/api/auth/login', { email, password }),
   register: (input: { email: string; password: string; name: string; company?: string; use_case?: string }) =>
@@ -218,4 +393,110 @@ export const api = {
   thread: (guestKey: string) =>
     apiPost<{ thread: SupportThread; assistant: { configured: boolean } }>('/api/support/thread', { guest_key: guestKey }),
   resolveThread: (guestKey: string) => apiPost<{ ok: true }>('/api/support/resolve', { guest_key: guestKey }),
+
+  /* ------------------------------- groups ------------------------------- */
+  groups: () => apiGet<{ groups: GroupRecord[] }>('/api/groups'),
+  createGroup: (input: { name: string; sort?: number; remark?: string }) =>
+    apiPost<{ group: GroupRecord }>('/api/groups', input),
+  updateGroup: (id: string, input: { name?: string; sort?: number; remark?: string }) =>
+    apiPatch<{ group: GroupRecord }>(`/api/groups/${id}`, input),
+  deleteGroup: (id: string) => apiDelete<{ moved: number; moved_to: string }>(`/api/groups/${id}`),
+  assignGroup: (id: string, phoneIds: string[]) =>
+    apiPost<{ result: BatchOutcome }>(`/api/groups/${id}/assign`, { phone_ids: phoneIds }),
+
+  /* ------------------------------- proxies ------------------------------ */
+  proxies: () => apiGet<{ proxies: ProxyRecord[] }>('/api/proxies'),
+  createProxy: (input: {
+    name?: string; host: string; port: string | number; user?: string
+    password?: string; protocol?: string; area?: string; group_ids?: string[]
+  }) => apiPost<{ proxy: ProxyRecord }>('/api/proxies', input),
+  importProxies: (text: string, groupIds?: string[]) =>
+    apiPost<{ added: ProxyRecord[]; skipped: { line: string; reason: string }[] }>(
+      '/api/proxies/import', { text, group_ids: groupIds ?? [] }),
+  checkProxy: (id: string) => apiPost<{ proxy: ProxyRecord }>(`/api/proxies/${id}/check`),
+  deleteProxy: (id: string) => apiDelete<{ detached: number }>(`/api/proxies/${id}`),
+  bindProxy: (id: string, phoneIds: string[]) =>
+    apiPost<{ result: BatchOutcome }>(`/api/proxies/${id}/bind`, { phone_ids: phoneIds }),
+  unbindProxy: (phoneIds: string[]) =>
+    apiPost<{ result: BatchOutcome }>('/api/proxies/unbind', { phone_ids: phoneIds }),
+
+  /* -------------------------------- apps -------------------------------- */
+  apps: () => apiGet<{ apps: AppRecord[] }>('/api/apps'),
+  uninstallApp: (packageName: string, phoneIds?: string[]) =>
+    apiPost<{ result: BatchOutcome }>('/api/apps/uninstall', {
+      package_name: packageName, phone_ids: phoneIds ?? [],
+    }),
+
+  /* ------------------------------- API keys ----------------------------- */
+  keys: () => apiGet<{ keys: ApiKeyRecord[]; scopes: ApiScope[] }>('/api/keys'),
+  createKey: (input: { name: string; scopes: string[] }) =>
+    apiPost<{ key: ApiKeyRecord; secret: string }>('/api/keys', input),
+  rotateKey: (id: string) => apiPost<{ key: ApiKeyRecord; secret: string }>(`/api/keys/${id}/rotate`),
+  revokeKey: (id: string) => apiDelete<{ key: ApiKeyRecord }>(`/api/keys/${id}`),
+
+  /* ----------------------------- cloud drive ---------------------------- */
+  files: () => apiGet<{ files: FileRecord[]; usage: { bytes: number; count: number } }>('/api/files'),
+  uploadFile: (file: File) => apiUpload<{ file: FileRecord }>('/api/files', file),
+  deleteFile: (id: string) => apiDelete<{ id: string }>(`/api/files/${id}`),
+  pushFile: (id: string, phoneIds: string[]) =>
+    apiPost<{ file: FileRecord; pushed: number }>(`/api/files/${id}/push`, { phone_ids: phoneIds }),
+
+  /* ---------------------------- cloud numbers --------------------------- */
+  numbers: () => apiGet<{ numbers: NumberRecord[]; sms: SmsRecord[] }>('/api/numbers'),
+  rentNumber: (input: { country: string; months?: number }) =>
+    apiPost<{ number: NumberRecord; charged_cents: number }>('/api/numbers', input),
+  bindNumber: (id: string, phoneId: string | null) =>
+    apiPost<{ number: NumberRecord }>(`/api/numbers/${id}/bind`, { phone_id: phoneId }),
+  releaseNumber: (id: string) => apiDelete<{ id: string }>(`/api/numbers/${id}`),
+
+  /* ------------------------------ automation ---------------------------- */
+  tasks: () => apiGet<{
+    tasks: TaskRecord[]
+    actions: { id: string; label: string }[]
+    triggers: string[]
+  }>('/api/tasks'),
+  createTask: (input: { name: string; action: string; trigger: string; group_id?: string; command?: string }) =>
+    apiPost<{ task: TaskRecord }>('/api/tasks', input),
+  setTaskStatus: (id: string, status: TaskRecord['status']) =>
+    apiPatch<{ task: TaskRecord }>(`/api/tasks/${id}`, { status }),
+  deleteTask: (id: string) => apiDelete<{ id: string }>(`/api/tasks/${id}`),
+  runTask: (id: string) => apiPost<{ task: TaskRecord; ok: number; failed: number }>(`/api/tasks/${id}/run`),
+
+  /* --------------------------------- team ------------------------------- */
+  team: () => apiGet<{ team: MemberRecord[]; roles: MemberRecord['role'][] }>('/api/team'),
+  inviteMember: (input: { name: string; email: string; role: string }) =>
+    apiPost<{ member: MemberRecord; invite_token: string }>('/api/team', input),
+  updateMember: (id: string, input: { name?: string; role?: string; status?: string }) =>
+    apiPatch<{ member: MemberRecord }>(`/api/team/${id}`, input),
+  removeMember: (id: string) => apiDelete<{ id: string }>(`/api/team/${id}`),
+
+  /* ----------------------------- sub-accounts --------------------------- */
+  subAccounts: () => apiGet<{ sub_accounts: SubAccountRecord[]; plans: string[] }>('/api/sub-accounts'),
+  createSubAccount: (input: {
+    company: string; contact: string; email: string
+    plan?: string; minutes_quota?: number; mrr?: number; margin?: number
+  }) => apiPost<{ sub_account: SubAccountRecord }>('/api/sub-accounts', input),
+  updateSubAccount: (id: string, input: Partial<SubAccountRecord>) =>
+    apiPatch<{ sub_account: SubAccountRecord }>(`/api/sub-accounts/${id}`, input),
+  deleteSubAccount: (id: string) => apiDelete<{ id: string }>(`/api/sub-accounts/${id}`),
+
+  overview: () => apiGet<OverviewData>('/api/overview'),
+
+  /* ------------------------------- account ------------------------------ */
+  updateProfile: (input: { name?: string; company?: string; use_case?: string; prefs?: UserPrefs }) =>
+    apiPatch<{ user: SessionUser }>('/api/profile', input),
+  changePassword: (current: string, next: string) =>
+    apiPost<{ ok: true }>('/api/password', { current, next }),
+  closeAccount: (confirm: string) => apiPost<{ ok: true }>('/api/close-account', { confirm }),
+
+  forgotPassword: (email: string) =>
+    apiPost<{ ok: true; message: string; delivery: string }>('/api/auth/forgot', { email }),
+  resetPassword: (token: string, password: string) =>
+    apiPost<{ user: SessionUser }>('/api/auth/reset', { token, password }),
+
+  invite: (token: string) =>
+    apiGet<{ invite: { name: string; email: string; role: string; company: string } }>(
+      `/api/auth/invite?token=${encodeURIComponent(token)}`),
+  acceptInvite: (token: string, password: string) =>
+    apiPost<{ user: SessionUser }>('/api/auth/join', { token, password }),
 }

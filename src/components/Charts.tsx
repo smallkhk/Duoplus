@@ -182,19 +182,24 @@ export function BarList({
   )
 }
 
-/** Compact 7×N activity heatmap. */
-export function Heatmap({ weeks = 14 }: { weeks?: number }) {
-  const cells = useMemo(
-    () => Array.from({ length: weeks * 7 }, (_, i) => (Math.sin(i * 1.7) + Math.cos(i / 3.1) + 2) / 4),
-    [weeks],
-  )
+/**
+ * A day-per-cell calendar of counts, oldest at the left. Intensity is scaled to
+ * the busiest day in the window, so a quiet account still reads.
+ */
+export function Heatmap({ data }: { data: { date: string; boots: number }[] }) {
+  const peak = useMemo(() => Math.max(1, ...data.map((d) => d.boots)), [data])
   return (
-    <div className="grid grid-flow-col grid-rows-7 gap-1" aria-hidden="true">
-      {cells.map((v, i) => (
+    <div className="grid grid-flow-col grid-rows-7 gap-1">
+      {data.map((d) => (
         <span
-          key={i}
+          key={d.date}
           className="size-2.5 rounded-[2px]"
-          style={{ background: `color-mix(in srgb, #6d5ef8 ${Math.round(v * 90) + 6}%, #141829)` }}
+          title={`${d.date} — ${d.boots} power-on${d.boots === 1 ? '' : 's'}`}
+          style={{
+            background: d.boots === 0
+              ? '#141829'
+              : `color-mix(in srgb, #6d5ef8 ${Math.round((d.boots / peak) * 84) + 16}%, #141829)`,
+          }}
         />
       ))}
     </div>

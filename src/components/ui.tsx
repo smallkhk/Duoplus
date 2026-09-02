@@ -80,16 +80,34 @@ const BUTTON_BASE =
   'inline-flex select-none items-center justify-center rounded-lg font-medium transition-colors duration-150 disabled:cursor-not-allowed'
 
 export function Button({
-  variant = 'primary', size = 'md', icon, iconRight, className, children, ...rest
+  variant = 'primary', size = 'md', icon, iconRight, loading = false,
+  className, children, disabled, ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: Variant; size?: Size; icon?: string; iconRight?: string
+  variant?: Variant; size?: Size; icon?: string; iconRight?: string; loading?: boolean
 }) {
   return (
-    <button className={cx(BUTTON_BASE, VARIANTS[variant], SIZES[size], className)} {...rest}>
-      {icon && <Icon name={icon} className="size-4 shrink-0" />}
+    <button
+      className={cx(BUTTON_BASE, VARIANTS[variant], SIZES[size], className)}
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
+      {...rest}
+    >
+      {loading
+        ? <Spinner className="size-4 shrink-0" />
+        : icon && <Icon name={icon} className="size-4 shrink-0" />}
       {children}
-      {iconRight && <Icon name={iconRight} className="size-4 shrink-0" />}
+      {iconRight && !loading && <Icon name={iconRight} className="size-4 shrink-0" />}
     </button>
+  )
+}
+
+/** A borrowed-ring spinner, sized to sit in place of a button icon. */
+export function Spinner({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" className={cx('animate-spin', className)} aria-hidden="true">
+      <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2" />
+      <path d="M14 8a6 6 0 0 0-6-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
   )
 }
 
@@ -160,13 +178,17 @@ export function Dot({ tone }: { tone: 'ok' | 'warn' | 'danger' | 'neutral' | 'br
 /* -------------------------------- forms -------------------------------- */
 
 export function Field({
-  label, hint, children, className,
-}: { label?: string; hint?: string; children: ReactNode; className?: string }) {
+  label, hint, error, children, className,
+}: {
+  label?: string; hint?: string; error?: string; children: ReactNode; className?: string
+}) {
   return (
     <label className={cx('block', className)}>
       {label && <span className="mb-1.5 block text-[0.78rem] font-medium text-ink-300">{label}</span>}
       {children}
-      {hint && <span className="mt-1.5 block text-[0.72rem] text-ink-500">{hint}</span>}
+      {error
+        ? <span className="mt-1.5 block text-[0.72rem] text-danger">{error}</span>
+        : hint && <span className="mt-1.5 block text-[0.72rem] text-ink-500">{hint}</span>}
     </label>
   )
 }

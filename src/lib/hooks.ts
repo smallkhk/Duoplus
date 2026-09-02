@@ -36,14 +36,15 @@ export function useAllPhones(): { phones: CloudPhone[] | null; reload: () => voi
   return { phones, reload: useCallback(() => setNonce((n) => n + 1), []) }
 }
 
-export function useProxies(): Proxy[] | null {
+export function useProxies(): { proxies: Proxy[] | null; reload: () => void } {
   const [proxies, setProxies] = useState<Proxy[] | null>(null)
+  const [nonce, setNonce] = useState(0)
   useEffect(() => {
     let cancelled = false
     callData<Paged<Proxy>>('/api/v1/proxy/list', { page: 1, pagesize: 100 })
       .then((d) => { if (!cancelled) setProxies(d.list) })
       .catch(() => { if (!cancelled) setProxies([]) })
     return () => { cancelled = true }
-  }, [])
-  return proxies
+  }, [nonce])
+  return { proxies, reload: useCallback(() => setNonce((n) => n + 1), []) }
 }
