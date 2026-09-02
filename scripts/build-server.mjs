@@ -12,7 +12,6 @@
  * node_modules is tens of thousands of files — shipping one file avoids that
  * entirely, and means no `npm install` is needed on the server.
  */
-import { build } from 'esbuild'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -22,6 +21,10 @@ const OUT_DIR = 'server-dist'
  * Dependencies are the usual reason a deploy build fails: `git pull` brings in
  * a new one and `npm run build` is run without `npm install`. esbuild's own
  * error for that is a stack trace, so check first and say the useful thing.
+ *
+ * esbuild is imported dynamically below rather than at the top of this file: a
+ * static import resolves before any of this runs, so a missing toolchain would
+ * report ERR_MODULE_NOT_FOUND instead of the command that fixes it.
  */
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
 const missing = Object.keys(pkg.dependencies ?? {})
@@ -32,6 +35,15 @@ if (missing.length > 0) {
   console.error('  Run "npm install" and build again.\n')
   process.exit(1)
 }
+
+if (!fs.existsSync(path.join('node_modules', 'esbuild'))) {
+  console.error('\n  esbuild is missing — it is a devDependency, and npm skips')
+  console.error('  those when NODE_ENV=production. Install them explicitly:\n')
+  console.error('      npm install --include=dev\n')
+  process.exit(1)
+}
+
+const { build } = await import('esbuild')
 
 const result = await build({
   entryPoints: ['server/index.ts'],
