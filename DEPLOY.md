@@ -77,7 +77,12 @@ cd ~/madova && git pull && npm install && npm run build && touch tmp/restart.txt
 ```
 
 `npm install` is not optional: a pull that adds a dependency makes the build fail without it. The
-build checks for missing packages first and says which, rather than reporting an esbuild error.
+build checks for missing packages first and names them rather than reporting a bundler error.
+
+The build toolchain — TypeScript, Vite, esbuild — lives in devDependencies, and cPanel exports
+`NODE_ENV=production` when the app's Application mode is Production, which makes npm skip them and
+the build fail with `tsc: command not found`. The committed `.npmrc` sets `include=dev` so this
+works either way; if you ever install with a different tool, use `npm install --include=dev`.
 
 If `npm run build` is killed part-way, the plan is out of memory. Retry with a smaller heap:
 `NODE_OPTIONS=--max-old-space-size=512 npm run build`.
