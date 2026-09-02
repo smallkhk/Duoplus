@@ -63,10 +63,43 @@ export const CHAINS: Record<ChainId, ChainSpec> = {
 export const merchantAddress = (chain: ChainId): string =>
   (process.env[CHAINS[chain].addressEnv] ?? '').trim()
 
-export const chainEnabled = (chain: ChainId): boolean => merchantAddress(chain).length > 0
+/**
+ * Shape of a valid receiving address per chain.
+ *
+ * This exists because a misconfigured address is silent and expensive: the
+ * checkout would show customers somewhere their money cannot be recovered from.
+ * A placeholder left in .env fails this check, so the network simply stays off.
+ */
+const ADDRESS_PATTERN: Record<ChainId, RegExp> = {
+  bsc: /^0x[0-9a-fA-F]{40}$/,
+  tron: /^T[1-9A-HJ-NP-Za-km-z]{33}$/,
+}
+
+export function addressProblem(chain: ChainId): string | null {
+  const address = merchantAddress(chain)
+  if (!address) return null // not configured at all — that is fine, the chain is just off
+  if (!ADDRESS_PATTERN[chain].test(address)) {
+    return `${CHAINS[chain].addressEnv} is not a valid ${CHAINS[chain].label} address `
+      + `("${address.slice(0, 24)}${address.length > 24 ? '…' : ''}"). `
+      + `${CHAINS[chain].label} payments are disabled until it is corrected.`
+  }
+  return null
+}
+
+export const chainEnabled = (chain: ChainId): boolean => {
+  const address = merchantAddress(chain)
+  return address.length > 0 && ADDRESS_PATTERN[chain].test(address)
+}
 
 export const enabledChains = (): ChainId[] =>
   (Object.keys(CHAINS) as ChainId[]).filter(chainEnabled)
+
+/** Startup diagnostics, so a bad address is loud rather than silent. */
+export function paymentWarnings(): string[] {
+  return (Object.keys(CHAINS) as ChainId[])
+    .map(addressProblem)
+    .filter((w): w is string => w !== null)
+}
 
 /** How long an invoice stays valid, and how settled a transfer must be. */
 const WINDOW_MINUTES = Number(process.env.MADOVA_PAYMENT_WINDOW_MIN ?? 40)

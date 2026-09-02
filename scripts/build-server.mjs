@@ -18,6 +18,21 @@ import path from 'node:path'
 
 const OUT_DIR = 'server-dist'
 
+/*
+ * Dependencies are the usual reason a deploy build fails: `git pull` brings in
+ * a new one and `npm run build` is run without `npm install`. esbuild's own
+ * error for that is a stack trace, so check first and say the useful thing.
+ */
+const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+const missing = Object.keys(pkg.dependencies ?? {})
+  .filter((name) => !fs.existsSync(path.join('node_modules', name)))
+
+if (missing.length > 0) {
+  console.error(`\n  Missing ${missing.length} dependency(s): ${missing.join(', ')}`)
+  console.error('  Run "npm install" and build again.\n')
+  process.exit(1)
+}
+
 const result = await build({
   entryPoints: ['server/index.ts'],
   outfile: path.join(OUT_DIR, 'app.js'),

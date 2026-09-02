@@ -76,6 +76,9 @@ source ~/nodevenv/madova/22/bin/activate
 cd ~/madova && git pull && npm install && npm run build && touch tmp/restart.txt
 ```
 
+`npm install` is not optional: a pull that adds a dependency makes the build fail without it. The
+build checks for missing packages first and says which, rather than reporting an esbuild error.
+
 If `npm run build` is killed part-way, the plan is out of memory. Retry with a smaller heap:
 `NODE_OPTIONS=--max-old-space-size=512 npm run build`.
 
@@ -280,7 +283,7 @@ That is the whole update. Nothing is built or installed on the server.
 If you have SSH access, the same thing from a terminal:
 
 ```bash
-cd ~/madova && git pull origin deploy && mkdir -p tmp && touch tmp/restart.txt
+cd ~/madova && git pull origin deploy && npm install && mkdir -p tmp && touch tmp/restart.txt
 ```
 
 `touch tmp/restart.txt` is how Passenger is told to reload — it is equivalent to pressing Restart.
@@ -365,12 +368,17 @@ loses data, not funds.
 ```bash
 cd ~/madova
 cat >> .env <<'EOF'
-MADOVA_BSC_ADDRESS=0xYourBscReceivingAddress
-MADOVA_TRON_ADDRESS=TYourTronReceivingAddress
+MADOVA_BSC_ADDRESS=0x...your real 42-character BSC address...
+MADOVA_TRON_ADDRESS=T...your real 34-character Tron address...
 MADOVA_BSCSCAN_API_KEY=your-free-bscscan-key
 EOF
 touch tmp/restart.txt
 ```
+
+Put your **real** addresses in — a placeholder is checked for shape and rejected, and the server
+logs which variable is wrong and leaves that network switched off rather than showing customers an
+address their money cannot be recovered from. Check the startup log after restarting: it prints
+`payments : bsc, tron` for the networks it accepted.
 
 Setting an address enables that network at checkout; leaving it blank hides it. A free BscScan key
 is strongly recommended — the unauthenticated endpoint is heavily rate limited. TronGrid works

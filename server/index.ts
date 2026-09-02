@@ -22,7 +22,8 @@ import {
 } from './billing.js'
 import { ARTICLES, CATEGORIES, articleById, searchArticles } from './knowledge.js'
 import {
-  applyCheck, checkIntent, createIntent, enabledChains, paymentConfig, type ChainId,
+  applyCheck, checkIntent, createIntent, enabledChains, paymentConfig, paymentWarnings,
+  type ChainId,
 } from './crypto.js'
 import { assistantConfigured, MODEL, PROVIDER_ID, PROVIDER_LABEL, runAssistant } from './assistant.js'
 import { DEMO_EMAIL, grantTrialPhone, seed } from './seed.js'
@@ -352,6 +353,9 @@ app.listen(PORT, () => {
   console.log(`  static files : ${distDir}`)
   console.log(`  env file     : ${envFile.loaded ? `${envFile.path} (${envFile.count} applied)` : 'none — using the process environment'}`)
   console.log(`  cloud phones : ${upstreamConfigured() ? 'live upstream' : 'local engine'}`)
+  const enabled = enabledChains()
+  console.log(`  payments     : ${enabled.length ? enabled.join(', ') : 'none configured'}`)
+  for (const warning of paymentWarnings()) console.warn(`  ⚠  ${warning}`)
   console.log(`  assistant    : ${assistantConfigured()
     ? `${PROVIDER_LABEL} · ${MODEL}`
     : 'fallback router (no model provider configured)'}`)
