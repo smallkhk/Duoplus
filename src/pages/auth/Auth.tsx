@@ -20,6 +20,8 @@ function AuthShell({ mode }: { mode: Mode }) {
   const isLogin = mode === 'login'
 
   const destination = (location.state as { from?: string } | null)?.from ?? '/console'
+  const demoAvailable = Boolean(meta?.demo_account.available)
+  const oauthProviders = meta?.oauth.providers ?? []
 
   /* Already signed in — don't make them log in twice. */
   useEffect(() => {
@@ -58,7 +60,7 @@ function AuthShell({ mode }: { mode: Mode }) {
   const fillDemo = (form: HTMLFormElement) => {
     const email = form.elements.namedItem('email') as HTMLInputElement | null
     const password = form.elements.namedItem('password') as HTMLInputElement | null
-    if (email) email.value = meta?.demo_account.email ?? 'demo@madova.io'
+    if (email) email.value = meta?.demo_account.email ?? ''
     if (password) password.value = 'madova-demo-2026'
   }
 
@@ -87,27 +89,32 @@ function AuthShell({ mode }: { mode: Mode }) {
                 : 'One cloud phone for 30 days with 30 minutes of runtime. No card, and nothing to install.'}
             </p>
 
-            <div className="mt-7 grid gap-2.5 sm:grid-cols-2">
-              {['Google', 'GitHub'].map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => toast(`${p} sign-in is not wired up in this demo build.`, 'info')}
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-ink-700 bg-ink-900/60 text-[0.83rem] font-medium text-ink-200 transition-colors hover:border-ink-600 hover:bg-ink-800"
-                >
-                  <Icon name={p === 'GitHub' ? 'code' : 'globe'} className="size-4" />
-                  {p}
-                </button>
-              ))}
-            </div>
+            {oauthProviders.length > 0 && (
+              <>
+                <div className="mt-7 grid gap-2.5 sm:grid-cols-2">
+                  {oauthProviders.map((provider) => (
+                    <button
+                      key={provider}
+                      type="button"
+                      onClick={() => { window.location.href = `/api/auth/oauth/${provider.toLowerCase()}` }}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-ink-700 bg-ink-900/60 text-[0.83rem] font-medium text-ink-200 transition-colors hover:border-ink-600 hover:bg-ink-800"
+                    >
+                      <Icon name={provider === 'GitHub' ? 'code' : 'globe'} className="size-4" />
+                      {provider}
+                    </button>
+                  ))}
+                </div>
 
-            <div className="my-6 flex items-center gap-3">
-              <span className="h-px flex-1 bg-ink-800" />
-              <span className="text-[0.7rem] uppercase tracking-wider text-ink-600">or</span>
-              <span className="h-px flex-1 bg-ink-800" />
-            </div>
+                <div className="my-6 flex items-center gap-3">
+                  <span className="h-px flex-1 bg-ink-800" />
+                  <span className="text-[0.7rem] uppercase tracking-wider text-ink-600">or</span>
+                  <span className="h-px flex-1 bg-ink-800" />
+                </div>
+              </>
+            )}
 
-            <form className="space-y-4" onSubmit={submit}>
+            {/* The social block supplies the gap above the form when present. */}
+            <form className={cx('space-y-4', oauthProviders.length === 0 && 'mt-8')} onSubmit={submit}>
               {error && (
                 <p role="alert" className="rounded-lg border border-danger/30 bg-danger/5 px-3.5 py-2.5 text-[0.82rem] leading-relaxed text-danger">
                   {error}
@@ -166,7 +173,7 @@ function AuthShell({ mode }: { mode: Mode }) {
                 {busy ? 'One moment…' : isLogin ? 'Sign in' : 'Create account'}
               </Button>
 
-              {isLogin && (
+              {isLogin && demoAvailable && (
                 <button
                   type="button"
                   onClick={(e) => fillDemo(e.currentTarget.form!)}

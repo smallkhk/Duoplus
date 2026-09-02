@@ -53,7 +53,14 @@ app.get('/api/meta', (_req, res) => {
       provider_label: PROVIDER_LABEL,
     },
     cloud: { upstream: upstreamConfigured() },
-    demo_account: { email: DEMO_EMAIL, hint: 'Seeded account with a populated fleet' },
+    /* Whether the seeded demo account is still present, so the sign-in page can
+     * offer it only when it exists. */
+    demo_account: {
+      email: DEMO_EMAIL,
+      available: Boolean(findUserByEmail(DEMO_EMAIL)),
+    },
+    /* No OAuth backend yet — the sign-in page hides providers it cannot honour. */
+    oauth: { providers: [] as string[] },
     durations: DURATIONS,
     payments: paymentConfig(),
   }))

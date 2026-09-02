@@ -156,7 +156,8 @@ export interface ServerMeta {
     provider_label: string | null
   }
   cloud: { upstream: boolean }
-  demo_account: { email: string; hint: string }
+  demo_account: { email: string; available: boolean }
+  oauth: { providers: string[] }
   durations: number[]
   payments: {
     enabled: ('bsc' | 'tron')[]
