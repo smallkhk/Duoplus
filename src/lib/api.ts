@@ -427,7 +427,7 @@ export const api = {
     apiPost<{ result: BatchOutcome }>(`/api/groups/${id}/assign`, { phone_ids: phoneIds }),
 
   /* ------------------------------- proxies ------------------------------ */
-  proxies: () => apiGet<{ proxies: ProxyRecord[] }>('/api/proxies'),
+  proxies: () => apiGet<{ proxies: ProxyRecord[]; managed: boolean }>('/api/proxies'),
   createProxy: (input: {
     name?: string; host: string; port: string | number; user?: string
     password?: string; protocol?: string; area?: string; group_ids?: string[]
@@ -437,8 +437,8 @@ export const api = {
       '/api/proxies/import', { text, group_ids: groupIds ?? [] }),
   checkProxy: (id: string) => apiPost<{ proxy: ProxyRecord }>(`/api/proxies/${id}/check`),
   deleteProxy: (id: string) => apiDelete<{ detached: number }>(`/api/proxies/${id}`),
-  bindProxy: (id: string, phoneIds: string[]) =>
-    apiPost<{ result: BatchOutcome }>(`/api/proxies/${id}/bind`, { phone_ids: phoneIds }),
+  bindProxy: (id: string, phoneIds: string[], dns = true) =>
+    apiPost<{ result: BatchOutcome }>(`/api/proxies/${id}/bind`, { phone_ids: phoneIds, dns }),
   unbindProxy: (phoneIds: string[]) =>
     apiPost<{ result: BatchOutcome }>('/api/proxies/unbind', { phone_ids: phoneIds }),
 

@@ -428,9 +428,11 @@ function PhoneDrawer({
   phone, onClose, onChanged,
 }: { phone: CloudPhone | null; onClose: () => void; onChanged: () => void }) {
   const toast = useToast()
-  const { proxies } = useProxies()
+  const { proxies, managed, reload: reloadProxies } = useProxies()
   const [tab, setTab] = useState<DrawerTab>('overview')
   const [busy, setBusy] = useState(false)
+  const [proxyOpen, setProxyOpen] = useState(false)
+  const [proxyPick, setProxyPick] = useState('')
 
   useEffect(() => { setTab('overview') }, [phone?.id])
 
@@ -460,6 +462,30 @@ function PhoneDrawer({
 
   const region = REGION_INDEX[phone.region]
   const proxy = (proxies ?? []).find((p) => p.id === phone.proxy_id)
+  /* Status 0 is "Not configured" — with no exit the device cannot boot. */
+  const needsProxy = phone.status === PhoneStatus.NotConfigured && !phone.proxy_id
+
+  const attachProxy = async () => {
+    setBusy(true)
+    try {
+      const { result } = proxyPick
+        ? await api.bindProxy(proxyPick, [phone.id])
+        : await api.unbindProxy([phone.id])
+      if (result.fail.length > 0) {
+        throw new Error(result.fail_reason[result.fail[0]] ?? 'The provider refused the change')
+      }
+      toast(proxyPick
+        ? `${(proxies ?? []).find((p) => p.id === proxyPick)?.name ?? 'Proxy'} attached to ${phone.name}.`
+        : `Proxy detached from ${phone.name}.`, 'ok')
+      setProxyOpen(false)
+      reloadProxies()
+      onChanged()
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not change the proxy.', 'danger')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -527,20 +553,37 @@ function PhoneDrawer({
               </dl>
 
               <div>
-                <p className="mb-2 text-[0.72rem] font-semibold uppercase tracking-wider text-ink-500">Proxy</p>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <p className="text-[0.72rem] font-semibold uppercase tracking-wider text-ink-500">Proxy</p>
+                  <Button size="sm" variant="ghost" onClick={() => { setProxyPick(phone.proxy_id ?? ''); setProxyOpen(true) }}>
+                    {proxy ? 'Change' : 'Attach a proxy'}
+                  </Button>
+                </div>
                 {proxy ? (
                   <div className="flex items-center gap-3 rounded-lg bg-ink-950/60 p-3.5 ring-1 ring-inset ring-ink-800">
-                    <Dot tone={proxy.healthy ? 'ok' : 'danger'} />
+                    <Dot tone={proxy.healthy ? 'ok' : 'neutral'} />
                     <span className="min-w-0 flex-1">
                       <span className="block text-[0.83rem] text-ink-100">{proxy.name}</span>
                       <span className="block font-mono text-[0.7rem] text-ink-500">
                         {proxy.protocol}://{proxy.host}:{proxy.port}
                       </span>
                     </span>
-                    <span className="font-mono text-[0.74rem] text-ink-400">{proxy.latency_ms} ms</span>
+                    {proxy.latency_ms > 0 && (
+                      <span className="font-mono text-[0.74rem] text-ink-400">{proxy.latency_ms} ms</span>
+                    )}
                   </div>
                 ) : (
-                  <p className="text-[0.82rem] text-ink-500">No proxy attached.</p>
+                  <div className={cx(
+                    'rounded-lg p-3.5 ring-1 ring-inset',
+                    needsProxy ? 'bg-warn/8 ring-warn/30' : 'bg-ink-950/60 ring-ink-800',
+                  )}>
+                    <p className="text-[0.82rem] leading-relaxed text-ink-300">
+                      {needsProxy
+                        ? 'This device is not configured yet. A cloud phone needs an exit before '
+                          + 'it can start — attach a proxy and it will come up on the next boot.'
+                        : 'No proxy attached. The device uses the data centre’s own exit.'}
+                    </p>
+                  </div>
                 )}
               </div>
 
@@ -618,6 +661,54 @@ function PhoneDrawer({
           {tab === 'adb' && <AdbPanel ids={[phone.id]} />}
         </div>
       </aside>
+
+      <Modal
+        open={proxyOpen}
+        onClose={() => setProxyOpen(false)}
+        title={`Proxy for ${phone.name}`}
+        description={managed
+          ? 'These come from your cloud phone provider. Pick one and the device is reconfigured to use it.'
+          : 'Pick one of the proxies on your account, or detach to use the data centre’s own exit.'}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setProxyOpen(false)}>Cancel</Button>
+            <Button onClick={attachProxy} loading={busy}>
+              {proxyPick ? 'Attach proxy' : 'Detach proxy'}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-5">
+          {(proxies ?? []).length === 0 ? (
+            <div className="flex items-start gap-2.5 rounded-lg border border-warn/30 bg-warn/5 p-3.5">
+              <Icon name="alert" className="mt-0.5 size-4 shrink-0 text-warn" />
+              <p className="text-[0.8rem] leading-relaxed text-ink-300">
+                {managed
+                  ? 'There are no proxies on your provider account yet. Add one in the provider’s '
+                    + 'dashboard and it will appear here — its API has no endpoint for creating them.'
+                  : 'No proxies on the account yet. Add one on the Proxies page first.'}
+              </p>
+            </div>
+          ) : (
+            <Field label="Proxy" hint="Device DNS is routed through the tunnel, which stops it resolving around the proxy.">
+              <Select value={proxyPick} onChange={(e) => setProxyPick(e.target.value)}>
+                <option value="">No proxy — use the data centre exit</option>
+                {(proxies ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} · {p.area} · {p.host}:{p.port}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
+          {needsProxy && (
+            <p className="text-[0.8rem] leading-relaxed text-ink-400">
+              The device reports <span className="text-ink-200">Not configured</span>. Attaching an
+              exit is what clears that — it will boot on the next power-on.
+            </p>
+          )}
+        </div>
+      </Modal>
     </div>
   )
 }

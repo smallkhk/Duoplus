@@ -482,6 +482,50 @@ export function proxiesOf(userId: string): Owned<Proxy>[] {
   return db().proxies.filter((p) => p.owner_id === userId)
 }
 
+/**
+ * The proxies a customer can actually bind to a device.
+ *
+ * With a provider configured, the only proxies that mean anything are the
+ * provider's own: it will reject an id it has never heard of. The provider's
+ * API has no create endpoint — proxies are added in its dashboard — so MADOVA
+ * lists what is there rather than pretending it can mint one.
+ *
+ * Without a provider, the account's own records are the list.
+ */
+export async function listProxies(user: User): Promise<{
+  proxies: Proxy[]
+  /** True when the list is the provider's and cannot be added to from here. */
+  managed: boolean
+}> {
+  if (!upstreamConfigured()) return { proxies: proxiesOf(user.id), managed: false }
+
+  const reply = await cloudCall(user, '/api/v1/proxy/list', { page: 1, pagesize: 100 })
+  if (reply.code !== 200) throw new Error(reply.message || 'Could not read the provider’s proxy list.')
+  const list = (reply.data as { list?: unknown })?.list
+  return { proxies: Array.isArray(list) ? list.map(normaliseProxy) : [], managed: true }
+}
+
+/** Fill in whatever the provider's proxy list left out, as with devices. */
+export function normaliseProxy(raw: Record<string, any>): Proxy {
+  const str = (v: unknown, fallback = '') => (v === undefined || v === null ? fallback : String(v))
+  return {
+    id: str(raw?.id),
+    name: str(raw?.name, str(raw?.id)),
+    host: str(raw?.host, '—'),
+    port: str(raw?.port, '—'),
+    user: str(raw?.user),
+    area: str(raw?.area, '—'),
+    group_ids: Array.isArray(raw?.group_ids) ? raw.group_ids.map((g: any) => str(g)) : [],
+    group_name: Array.isArray(raw?.group_name) ? raw.group_name.map((g: any) => str(g)) : [],
+    protocol: (['socks5', 'http', 'https'].includes(String(raw?.protocol))
+      ? String(raw.protocol)
+      : 'socks5') as Proxy['protocol'],
+    latency_ms: Number(raw?.latency_ms ?? 0),
+    checked_at: str(raw?.checked_at, '—'),
+    healthy: Boolean(raw?.healthy),
+  }
+}
+
 export interface ProxyInput {
   name?: string
   host: string
@@ -618,12 +662,57 @@ export async function checkProxy(userId: string, id: string): Promise<Owned<Prox
 }
 
 /** Point devices at a proxy, or at none when proxyId is empty. */
-export function bindProxy(userId: string, phoneIds: string[], proxyId: string): BatchResult {
-  if (proxyId && !proxiesOf(userId).some((p) => p.id === proxyId)) throw new Error('Proxy not found.')
+/**
+ * Point devices at a proxy, or at none when proxyId is empty.
+ *
+ * With a provider configured this has to reach the provider — a device is
+ * unusable until it has an exit, and writing the id into MADOVA's own record
+ * would look like it worked while the handset stayed unconfigured. The
+ * provider takes it on the batch-update endpoint, twenty devices at a time.
+ */
+export async function bindProxy(
+  user: User,
+  phoneIds: string[],
+  proxyId: string,
+  dns = true,
+): Promise<BatchResult> {
+  if (upstreamConfigured()) {
+    if (proxyId) {
+      const { proxies } = await listProxies(user)
+      if (!proxies.some((p) => p.id === proxyId)) {
+        throw new Error('That proxy is not on the provider account.')
+      }
+    }
+    const result: BatchResult = { success: [], fail: [], fail_reason: {} }
+    for (let i = 0; i < phoneIds.length; i += 20) {
+      const batch = phoneIds.slice(i, i + 20)
+      const reply = await cloudCall(user, '/api/v1/cloudPhone/update', {
+        images: batch.map((image_id) => ({
+          image_id,
+          /* An empty id detaches; dns 1 routes device DNS through the tunnel. */
+          proxy: { id: proxyId, dns: dns ? 1 : 2 },
+        })),
+      })
+      if (reply.code !== 200) {
+        for (const id of batch) {
+          result.fail.push(id)
+          result.fail_reason[id] = reply.message || 'The provider refused the change'
+        }
+        continue
+      }
+      const r = reply.data as BatchResult
+      result.success.push(...(r?.success ?? batch))
+      result.fail.push(...(r?.fail ?? []))
+      Object.assign(result.fail_reason, r?.fail_reason ?? {})
+    }
+    return result
+  }
+
+  if (proxyId && !proxiesOf(user.id).some((p) => p.id === proxyId)) throw new Error('Proxy not found.')
   const result: BatchResult = { success: [], fail: [], fail_reason: {} }
   mutate((d) => {
     for (const id of phoneIds) {
-      const phone = d.phones.find((p) => p.id === id && p.owner_id === userId)
+      const phone = d.phones.find((p) => p.id === id && p.owner_id === user.id)
       if (!phone) {
         result.fail.push(id)
         result.fail_reason[id] = 'Cloud phone not found on this account'

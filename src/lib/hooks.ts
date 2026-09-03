@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { api } from './api'
 import { callData } from './duoplus/client'
 import type { CloudPhone, Paged, Proxy } from './duoplus/types'
 
@@ -36,15 +37,26 @@ export function useAllPhones(): { phones: CloudPhone[] | null; reload: () => voi
   return { phones, reload: useCallback(() => setNonce((n) => n + 1), []) }
 }
 
-export function useProxies(): { proxies: Proxy[] | null; reload: () => void } {
+/**
+ * The proxies this account can bind. Read through MADOVA rather than the
+ * device API directly, because with a provider configured the authoritative
+ * list is the provider's and MADOVA is the one that knows which is in play.
+ */
+export function useProxies(): {
+  proxies: Proxy[] | null
+  /** True when the list comes from the provider and cannot be added to here. */
+  managed: boolean
+  reload: () => void
+} {
   const [proxies, setProxies] = useState<Proxy[] | null>(null)
+  const [managed, setManaged] = useState(false)
   const [nonce, setNonce] = useState(0)
   useEffect(() => {
     let cancelled = false
-    callData<Paged<Proxy>>('/api/v1/proxy/list', { page: 1, pagesize: 100 })
-      .then((d) => { if (!cancelled) setProxies(d.list) })
+    api.proxies()
+      .then((d) => { if (!cancelled) { setProxies(d.proxies); setManaged(d.managed) } })
       .catch(() => { if (!cancelled) setProxies([]) })
     return () => { cancelled = true }
   }, [nonce])
-  return { proxies, reload: useCallback(() => setNonce((n) => n + 1), []) }
+  return { proxies, managed, reload: useCallback(() => setNonce((n) => n + 1), []) }
 }

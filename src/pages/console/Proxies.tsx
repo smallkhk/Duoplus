@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { PageHeader } from '@/components/ConsoleLayout'
 import { Icon } from '@/components/Icon'
 import {
@@ -12,6 +13,9 @@ const BLANK = { name: '', protocol: 'socks5', host: '', port: '', user: '', pass
 export function Proxies() {
   const toast = useToast()
   const [proxies, setProxies] = useState<ProxyRecord[] | null>(null)
+  /* True when the provider owns the list: it has no create endpoint, so the
+     add and import forms would write records it will never accept. */
+  const [managed, setManaged] = useState(false)
   const [groups, setGroups] = useState<GroupRecord[]>([])
   const { phones, reload: reloadPhones } = useAllPhones()
 
@@ -26,7 +30,9 @@ export function Proxies() {
   const [busy, setBusy] = useState(false)
 
   const load = useCallback(() => {
-    api.proxies().then((d) => setProxies(d.proxies)).catch(() => setProxies([]))
+    api.proxies()
+      .then((d) => { setProxies(d.proxies); setManaged(d.managed) })
+      .catch(() => setProxies([]))
   }, [])
 
   useEffect(() => {
@@ -117,14 +123,14 @@ export function Proxies() {
       <PageHeader
         title="Proxies"
         lead="Bring your own residential, mobile or datacentre exits. Check reachability on demand, then bind a proxy to individual devices or a whole group."
-        actions={
+        actions={managed ? null : (
           <>
             <Button variant="secondary" size="sm" icon="upload" onClick={() => setImportOpen(true)}>
               Import list
             </Button>
             <Button size="sm" icon="plus" onClick={() => setOpen(true)}>Add proxy</Button>
           </>
-        }
+        )}
       />
 
       <div className="mb-4 grid gap-4 sm:grid-cols-3">
@@ -149,12 +155,30 @@ export function Proxies() {
         ))}
       </div>
 
+      {managed && (
+        <Card className="mb-4 flex items-start gap-3 p-5">
+          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-ink-800 text-brand-300">
+            <Icon name="info" className="size-4" />
+          </span>
+          <p className="text-[0.82rem] leading-relaxed text-ink-300">
+            These proxies belong to your cloud phone provider and are managed in its dashboard —
+            its API has no endpoint for creating them, so MADOVA lists what is there rather than
+            pretending otherwise. Attach one to a device from{' '}
+            <Link to="/console/phones" className="text-brand-300 underline underline-offset-2">
+              Cloud phones
+            </Link>.
+          </p>
+        </Card>
+      )}
+
       {proxies?.length === 0 && (
         <EmptyState
           icon="route"
-          title="No proxies yet"
-          body="Add one endpoint at a time, or paste a whole list from your provider. Devices run direct until you bind one."
-          action={<Button icon="plus" onClick={() => setOpen(true)}>Add the first proxy</Button>}
+          title={managed ? 'No proxies on the provider account' : 'No proxies yet'}
+          body={managed
+            ? 'Add one in your provider’s dashboard and it will appear here, ready to attach to a device.'
+            : 'Add one endpoint at a time, or paste a whole list from your provider. Devices run direct until you bind one.'}
+          action={managed ? undefined : <Button icon="plus" onClick={() => setOpen(true)}>Add the first proxy</Button>}
         />
       )}
 
@@ -219,10 +243,13 @@ export function Proxies() {
                   <td className="px-5 py-3.5 font-mono text-ink-200">{boundCount(p.id)}</td>
                   <td className="px-5 py-3.5">
                     <div className="flex justify-end gap-1">
-                      <Button size="sm" variant="ghost" loading={checking === p.id} onClick={() => check(p.id)}>
-                        {checking === p.id ? 'Checking' : 'Check'}
-                      </Button>
+                      {!managed && (
+                        <Button size="sm" variant="ghost" loading={checking === p.id} onClick={() => check(p.id)}>
+                          {checking === p.id ? 'Checking' : 'Check'}
+                        </Button>
+                      )}
                       <button
+                        hidden={managed}
                         onClick={() => setRemoving(p)}
                         className="rounded-lg p-1.5 text-ink-500 hover:bg-danger/10 hover:text-danger"
                         aria-label={`Delete ${p.name}`}

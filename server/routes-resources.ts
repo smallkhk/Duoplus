@@ -7,8 +7,8 @@ import express from 'express'
 import { requireAuth, requireRole } from './auth.js'
 import {
   appsOf, assignGroup, bindProxy, checkProxy, cloudCall, createGroup, createProxy,
-  deleteGroup, deleteProxy, groupsOf, importProxies, installApp, proxiesOf,
-  uninstallApp, updateGroup,
+  deleteGroup, deleteProxy, groupsOf, importProxies, installApp, listProxies,
+  uninstallApp, updateGroup, upstreamConfigured,
 } from './fleet.js'
 import {
   InputError, MAX_FILE_BYTES, TASK_ACTIONS, TASK_TRIGGERS, TEAM_ROLES,
@@ -97,20 +97,40 @@ resourceRoutes.post('/groups/:id/assign', operator, (req, res) =>
 /* -------------------------------- proxies -------------------------------- */
 
 resourceRoutes.get('/proxies', requireAuth, (req, res) =>
-  handle(res, () => ({ proxies: proxiesOf(req.user!.id).map(strip) })))
+  handleAsync(res, async () => {
+    const { proxies, managed } = await listProxies(req.user!)
+    /* `managed` tells the console the list is the provider's, so it can offer
+       binding rather than an add form the provider has no endpoint for. */
+    return { proxies, managed }
+  }))
+
+/* The provider has no create endpoint, so these are refused rather than
+   silently writing a record it will never accept. */
+const localProxiesOnly = () => {
+  if (upstreamConfigured()) {
+    throw new InputError(
+      'Proxies come from your cloud phone provider and are added in its dashboard. '
+      + 'They appear here automatically, ready to bind to a device.',
+    )
+  }
+}
 
 resourceRoutes.post('/proxies', admin, (req, res) =>
-  handle(res, () => ({
+  handle(res, () => {
+    localProxiesOnly()
+    return ({
     proxy: strip(createProxy(req.user!.id, {
       name: req.body?.name, host: req.body?.host, port: req.body?.port,
       user: req.body?.user, password: req.body?.password,
       protocol: req.body?.protocol, area: req.body?.area,
       group_ids: ids(req.body?.group_ids),
     })),
-  })))
+  })
+  }))
 
 resourceRoutes.post('/proxies/import', admin, (req, res) =>
   handle(res, () => {
+    localProxiesOnly()
     const result = importProxies(req.user!.id, String(req.body?.text ?? ''), ids(req.body?.group_ids))
     return { added: result.added.map(strip), skipped: result.skipped }
   }))
@@ -119,13 +139,22 @@ resourceRoutes.post('/proxies/:id/check', operator, (req, res) =>
   handleAsync(res, async () => ({ proxy: strip(await checkProxy(req.user!.id, req.params.id)) })))
 
 resourceRoutes.delete('/proxies/:id', admin, (req, res) =>
-  handle(res, () => deleteProxy(req.user!.id, req.params.id)))
+  handle(res, () => {
+    localProxiesOnly()
+    return deleteProxy(req.user!.id, req.params.id)
+  }))
 
 resourceRoutes.post('/proxies/:id/bind', operator, (req, res) =>
-  handle(res, () => ({ result: bindProxy(req.user!.id, ids(req.body?.phone_ids), req.params.id) })))
+  handleAsync(res, async () => ({
+    result: await bindProxy(
+      req.user!, ids(req.body?.phone_ids), req.params.id, req.body?.dns !== false,
+    ),
+  })))
 
 resourceRoutes.post('/proxies/unbind', operator, (req, res) =>
-  handle(res, () => ({ result: bindProxy(req.user!.id, ids(req.body?.phone_ids), '') })))
+  handleAsync(res, async () => ({
+    result: await bindProxy(req.user!, ids(req.body?.phone_ids), ''),
+  })))
 
 /* --------------------------------- apps ---------------------------------- */
 
