@@ -8,7 +8,7 @@ import { requireAuth, requireRole } from './auth.js'
 import {
   appsOf, assignGroup, bindProxy, checkProxy, cloudCall, createGroup, createProxy,
   deleteGroup, deleteProxy, groupsOf, importProxies, initProxyDirect, installApp,
-  listProxies, uninstallApp, updateGroup, upstreamConfigured,
+  listProxies, screenLink, stopSharing, uninstallApp, updateGroup, upstreamConfigured,
 } from './fleet.js'
 import {
   InputError, MAX_FILE_BYTES, TASK_ACTIONS, TASK_TRIGGERS, TEAM_ROLES,
@@ -168,6 +168,18 @@ resourceRoutes.post('/proxies/unbind', operator, (req, res) =>
   handleAsync(res, async () => ({
     result: await bindProxy(req.user!, ids(req.body?.phone_ids), ''),
   })))
+
+/* -------------------------------- screen --------------------------------- */
+
+/** The link that shows a device's live screen, and the password it needs. */
+resourceRoutes.post('/phones/:id/screen', operator, (req, res) =>
+  handleAsync(res, async () => await screenLink(req.user!, req.params.id)))
+
+resourceRoutes.delete('/phones/:id/screen', operator, (req, res) =>
+  handleAsync(res, async () => {
+    await stopSharing(req.user!, req.params.id)
+    return { stopped: true }
+  }))
 
 /* --------------------------------- apps ---------------------------------- */
 

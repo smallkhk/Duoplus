@@ -446,6 +446,12 @@ export const api = {
   unbindProxy: (phoneIds: string[]) =>
     apiPost<{ result: BatchOutcome }>('/api/proxies/unbind', { phone_ids: phoneIds }),
 
+  /* ------------------------------- screen ------------------------------- */
+  screenLink: (phoneId: string) =>
+    apiPost<{ url: string; code: string }>(`/api/phones/${phoneId}/screen`),
+  stopSharing: (phoneId: string) =>
+    apiDelete<{ stopped: true }>(`/api/phones/${phoneId}/screen`),
+
   /* -------------------------------- apps -------------------------------- */
   apps: () => apiGet<{ apps: AppRecord[] }>('/api/apps'),
   uninstallApp: (packageName: string, phoneIds?: string[]) =>

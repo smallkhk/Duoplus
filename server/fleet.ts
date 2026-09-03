@@ -9,6 +9,7 @@
  * OpenAPI instead of the local engine. The key stays on the server; the browser
  * never sees it.
  */
+import crypto from 'node:crypto'
 import net from 'node:net'
 import { setting } from './settings.js'
 import {
@@ -566,6 +567,76 @@ export async function initProxyDirect(user: User, phoneIds: string[], input: {
   return result
 }
 
+/* -------------------------------- screen --------------------------------- */
+
+/**
+ * A stable password for a device's share link.
+ *
+ * Derived from the session secret rather than stored, so it survives restarts,
+ * needs no schema, and cannot be guessed without the secret. Deriving also
+ * means re-opening the screen gives the customer the same password rather than
+ * a new one each time, which is what makes it usable at all.
+ */
+function shareCode(imageId: string): string {
+  const secret = process.env.MADOVA_SESSION_SECRET ?? 'madova-dev-secret'
+  return crypto.createHmac('sha256', secret)
+    .update(`share.${imageId}`)
+    .digest('base64url')
+    .replace(/[^A-Za-z0-9]/g, '')
+    .slice(0, 16)
+}
+
+export interface ScreenLink {
+  url: string
+  code: string
+}
+
+/**
+ * Turn on sharing for a device and hand back the link that shows its screen.
+ *
+ * The provider streams a device through a browser page of its own; there is no
+ * raw video endpoint to render ourselves. Enabling the share is what produces
+ * that page, so "watch this device" and "share this device" are the same call.
+ */
+export async function screenLink(user: User, imageId: string): Promise<ScreenLink> {
+  if (!upstreamConfigured()) {
+    throw new Error(
+      'Live screen needs a cloud phone provider. Without a key the device is served by '
+      + 'MADOVA’s own engine, which has no screen to stream.',
+    )
+  }
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(imageId)) throw new Error('That is not a valid device id.')
+
+  const code = shareCode(imageId)
+  const reply = await cloudCall(user, '/api/v1/cloudPhone/share', {
+    share: [{
+      image_ids: [imageId],
+      config: {
+        share_status: 1,
+        /* 3 Edit params, 4 Cloud drive, 5 Command line — everything the console
+           already lets this customer do, so the shared view is not more
+           permissive than the account it came from. */
+        share_auth: [3, 4, 5],
+        share_code: code,
+      },
+    }],
+  })
+  if (reply.code !== 200) throw new Error(reply.message || 'The provider would not share that device.')
+
+  const map = (reply.data ?? {}) as Record<string, string>
+  const url = map[imageId] ?? Object.values(map).find(Boolean) ?? ''
+  if (!url) throw new Error('The provider returned no link for that device.')
+  return { url, code }
+}
+
+/** Turn sharing back off, so a link that has been passed around stops working. */
+export async function stopSharing(user: User, imageId: string): Promise<void> {
+  const reply = await cloudCall(user, '/api/v1/cloudPhone/share', {
+    share: [{ image_ids: [imageId], config: { share_status: 2 } }],
+  })
+  if (reply.code !== 200) throw new Error(reply.message || 'Could not stop sharing that device.')
+}
+
 /** Fill in whatever the provider's proxy list left out, as with devices. */
 export function normaliseProxy(raw: Record<string, any>): Proxy {
   const str = (v: unknown, fallback = '') => (v === undefined || v === null ? fallback : String(v))
@@ -1110,6 +1181,7 @@ export const ALLOWED_PATHS = new Set([
   '/api/v1/cloudPhone/batchRoot',
   '/api/v1/cloudPhone/update',
   '/api/v1/cloudPhone/initProxy',
+  '/api/v1/cloudPhone/share',
   '/api/v1/cloudPhone/command',
   '/api/v1/cloudPhone/renewal',
   '/api/v1/proxy/list',
