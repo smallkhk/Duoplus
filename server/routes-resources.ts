@@ -173,7 +173,13 @@ resourceRoutes.post('/proxies/unbind', operator, (req, res) =>
 
 /** The link that shows a device's live screen, and the password it needs. */
 resourceRoutes.post('/phones/:id/screen', operator, (req, res) =>
-  handleAsync(res, async () => await screenLink(req.user!, req.params.id)))
+  handleAsync(res, async () => await screenLink(req.user!, req.params.id, {
+    width: req.body?.width === undefined ? undefined : Number(req.body.width),
+    height: req.body?.height === undefined ? undefined : Number(req.body.height),
+    clarity: req.body?.clarity ? String(req.body.clarity) : undefined,
+    fps: req.body?.fps === undefined ? undefined : Number(req.body.fps),
+    bitrate: req.body?.bitrate === undefined ? undefined : Number(req.body.bitrate),
+  })))
 
 resourceRoutes.delete('/phones/:id/screen', operator, (req, res) =>
   handleAsync(res, async () => {

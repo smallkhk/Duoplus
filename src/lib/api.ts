@@ -447,8 +447,9 @@ export const api = {
     apiPost<{ result: BatchOutcome }>('/api/proxies/unbind', { phone_ids: phoneIds }),
 
   /* ------------------------------- screen ------------------------------- */
-  screenLink: (phoneId: string) =>
-    apiPost<{ url: string; code: string }>(`/api/phones/${phoneId}/screen`),
+  screenLink: (phoneId: string, view?: {
+    width?: number; height?: number; clarity?: string; fps?: number; bitrate?: number
+  }) => apiPost<{ url: string; code: string }>(`/api/phones/${phoneId}/screen`, view ?? {}),
   stopSharing: (phoneId: string) =>
     apiDelete<{ stopped: true }>(`/api/phones/${phoneId}/screen`),
 

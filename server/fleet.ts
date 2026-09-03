@@ -598,7 +598,14 @@ export interface ScreenLink {
  * raw video endpoint to render ourselves. Enabling the share is what produces
  * that page, so "watch this device" and "share this device" are the same call.
  */
-export async function screenLink(user: User, imageId: string): Promise<ScreenLink> {
+export async function screenLink(user: User, imageId: string, view: {
+  width?: number
+  height?: number
+  /** S, M or L — the provider's own clarity steps. */
+  clarity?: string
+  fps?: number
+  bitrate?: number
+} = {}): Promise<ScreenLink> {
   if (!upstreamConfigured()) {
     throw new Error(
       'Live screen needs a cloud phone provider. Without a key the device is served by '
@@ -624,9 +631,45 @@ export async function screenLink(user: User, imageId: string): Promise<ScreenLin
   if (reply.code !== 200) throw new Error(reply.message || 'The provider would not share that device.')
 
   const map = (reply.data ?? {}) as Record<string, string>
-  const url = map[imageId] ?? Object.values(map).find(Boolean) ?? ''
-  if (!url) throw new Error('The provider returned no link for that device.')
-  return { url, code }
+  const raw = map[imageId] ?? Object.values(map).find(Boolean) ?? ''
+  if (!raw) throw new Error('The provider returned no link for that device.')
+  return { url: sizeStream(raw, view), code }
+}
+
+/**
+ * Rewrite the stream's own sizing parameters.
+ *
+ * The link comes back sized for a small panel — around 363×682 at the lowest
+ * clarity and ten frames a second. Those are query parameters on the provider's
+ * player, so asking for the size the browser is actually going to render at
+ * gives a sharp picture instead of an upscaled one.
+ */
+function sizeStream(raw: string, view: {
+  width?: number; height?: number; clarity?: string; fps?: number; bitrate?: number
+}): string {
+  try {
+    const url = new URL(raw)
+    const int = (v: unknown, lo: number, hi: number) => {
+      const n = Math.round(Number(v))
+      return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : undefined
+    }
+    const w = int(view.width, 240, 2000)
+    const h = int(view.height, 320, 2400)
+    const fps = int(view.fps, 5, 60)
+    const bitrate = int(view.bitrate, 200, 8000)
+
+    if (w) url.searchParams.set('w', String(w))
+    if (h) url.searchParams.set('h', String(h))
+    if (fps) url.searchParams.set('fps', String(fps))
+    if (bitrate) url.searchParams.set('bitrate', String(bitrate))
+    if (view.clarity && ['S', 'M', 'L'].includes(view.clarity)) {
+      url.searchParams.set('clarity', view.clarity)
+    }
+    return url.toString()
+  } catch {
+    /* An unparseable link is still the provider's to serve — hand it back as is. */
+    return raw
+  }
 }
 
 /** Turn sharing back off, so a link that has been passed around stops working. */

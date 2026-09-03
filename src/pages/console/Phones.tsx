@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PageHeader } from '@/components/ConsoleLayout'
 import { Icon } from '@/components/Icon'
 import { PhoneFrame } from '@/components/PhoneFrame'
@@ -440,25 +440,59 @@ function PhoneDrawer({
   })
   const [screen, setScreen] = useState<{ url: string; code: string } | null>(null)
   const [screenError, setScreenError] = useState<string | null>(null)
+  const [full, setFull] = useState(false)
+  const [clarity, setClarity] = useState('M')
+  /* The stream is asked for at the size it will actually be drawn at. */
+  const stageRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setTab('overview')
     /* A link belongs to one device; carrying it across would show the wrong screen. */
     setScreen(null)
     setScreenError(null)
+    setFull(false)
   }, [phone?.id])
 
-  const openScreen = async () => {
+  const openScreen = async (opts: { clarity?: string; full?: boolean } = {}) => {
     if (!phone) return
     setBusy(true)
     setScreenError(null)
     try {
-      setScreen(await api.screenLink(phone.id))
+      /* Fullscreen is requested before the element resizes, so the target size
+         is computed rather than measured in that case. */
+      const wantFull = opts.full ?? full
+      const box = stageRef.current?.getBoundingClientRect()
+      const width = wantFull
+        ? Math.round(window.innerHeight * 0.46)
+        : Math.round(box?.width ?? 400)
+      const height = wantFull
+        ? Math.round(window.innerHeight)
+        : Math.round(box?.height ?? 720)
+      const want = opts.clarity ?? clarity
+      setScreen(await api.screenLink(phone.id, {
+        width,
+        height,
+        clarity: want,
+        /* Sharper streams are only worth it at a higher frame rate. */
+        fps: want === 'L' ? 30 : want === 'M' ? 20 : 10,
+        bitrate: want === 'L' ? 3000 : want === 'M' ? 1500 : 600,
+      }))
     } catch (err) {
       setScreenError(err instanceof Error ? err.message : 'Could not open the screen.')
     } finally {
       setBusy(false)
     }
+  }
+
+  /* Re-request the stream when the picture it should be drawing changes. */
+  const changeClarity = (next: string) => {
+    setClarity(next)
+    if (screen) void openScreen({ clarity: next })
+  }
+
+  const toggleFull = (next: boolean) => {
+    setFull(next)
+    if (screen) void openScreen({ full: next })
   }
 
   const endScreen = async () => {
@@ -537,7 +571,11 @@ function PhoneDrawer({
         role="dialog"
         aria-modal="true"
         aria-label={`${phone.name} details`}
-        className="relative flex h-full w-full max-w-2xl flex-col border-l border-ink-700 bg-ink-900 shadow-2xl"
+        className={cx(
+          'relative flex h-full w-full flex-col border-l border-ink-700 bg-ink-900 shadow-2xl transition-[max-width] duration-200',
+          /* The stream is the one thing worth the whole window. */
+          tab === 'screen' ? 'max-w-6xl' : 'max-w-2xl',
+        )}
       >
         <header className="flex items-start justify-between gap-4 border-b border-ink-800 px-6 py-4">
           <div className="min-w-0">
@@ -667,7 +705,7 @@ function PhoneDrawer({
           )}
 
           {tab === 'screen' && (
-            <div className="space-y-5">
+            <div className="space-y-4">
               {phone.status !== PhoneStatus.PoweredOn ? (
                 <div className="flex flex-col items-center py-6">
                   <PhoneFrame className="w-52" tone="off" />
@@ -677,43 +715,101 @@ function PhoneDrawer({
                   </p>
                 </div>
               ) : screen ? (
-                <>
-                  {/* The provider streams through a page of its own — there is no
-                      raw video endpoint — so it is embedded rather than redrawn. */}
-                  <div className="overflow-hidden rounded-xl border border-ink-700 bg-ink-950">
+                /* A portrait stream cannot fill a wide panel, so the width it
+                   cannot use carries the controls instead of sitting empty. */
+                <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_17rem]">
+                  <div
+                    ref={stageRef}
+                    className={cx(
+                      'overflow-hidden rounded-xl border border-ink-700 bg-ink-950',
+                      full
+                        ? 'fixed inset-0 z-[60] rounded-none border-0'
+                        : 'mx-auto aspect-[9/19.5] h-[calc(100vh-15rem)] max-h-[52rem]',
+                    )}
+                  >
+                    {full && (
+                      <button
+                        onClick={() => toggleFull(false)}
+                        className="absolute right-4 top-4 z-10 inline-flex h-9 items-center gap-2 rounded-lg bg-ink-900/90 px-3 text-[0.8rem] font-medium text-ink-100 ring-1 ring-inset ring-ink-700 backdrop-blur hover:bg-ink-800"
+                      >
+                        <Icon name="minus" className="size-3.5" />
+                        Exit full screen
+                      </button>
+                    )}
                     <iframe
                       src={screen.url}
                       title={`${phone.name} screen`}
-                      className="h-[26rem] w-full"
-                      allow="clipboard-read; clipboard-write; fullscreen"
+                      className="size-full border-0"
+                      allow="clipboard-read; clipboard-write; fullscreen; autoplay"
                     />
                   </div>
-                  <div className="rounded-xl border border-ink-800 bg-ink-950/60 p-4">
-                    <p className="text-[0.78rem] leading-relaxed text-ink-400">
-                      The stream asks for a password the first time. If the frame above stays
-                      blank, the provider is refusing to be embedded — open it in a tab instead.
-                    </p>
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <span className="rounded-lg bg-ink-900 px-2.5 py-1.5 font-mono text-[0.78rem] text-ink-100">
-                        {screen.code}
-                      </span>
-                      <CopyButton text={screen.code} label="Copy password" />
-                      <a
-                        href={screen.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[0.8rem] font-medium text-ink-100 ring-1 ring-inset ring-ink-700 transition-colors hover:bg-ink-800/70"
+
+                  <div className="space-y-3">
+                    <div className="space-y-2.5 rounded-xl border border-ink-800 bg-ink-950/60 p-4">
+                      <p className="text-[0.72rem] font-semibold uppercase tracking-wider text-ink-500">
+                        Session
+                      </p>
+                      <Button
+                        size="sm" variant="secondary" className="w-full"
+                        icon={full ? 'minus' : 'monitor'}
+                        onClick={() => toggleFull(!full)}
                       >
-                        <Icon name="external" className="size-3.5" />
-                        Open in a tab
-                      </a>
-                      <span className="flex-1" />
-                      <Button size="sm" variant="ghost" loading={busy} onClick={endScreen}>
-                        Stop sharing
+                        {full ? 'Exit full screen' : 'Full screen'}
+                      </Button>
+                      <Select
+                        value={clarity}
+                        onChange={(e) => changeClarity(e.target.value)}
+                        aria-label="Stream quality"
+                      >
+                        <option value="S">Smooth · lowest data</option>
+                        <option value="M">Balanced</option>
+                        <option value="L">Sharp · most data</option>
+                      </Select>
+                      <Button size="sm" variant="ghost" className="w-full" loading={busy} onClick={endScreen}>
+                        End session
                       </Button>
                     </div>
+
+                    <div className="space-y-2.5 rounded-xl border border-ink-800 bg-ink-950/60 p-4">
+                      <p className="text-[0.72rem] font-semibold uppercase tracking-wider text-ink-500">
+                        Device
+                      </p>
+                      <Button
+                        size="sm" variant="secondary" className="w-full" icon="restart" disabled={busy}
+                        onClick={() => void power('/api/v1/cloudPhone/restart', 'Restarted')}
+                      >
+                        Restart
+                      </Button>
+                      <Button
+                        size="sm" variant="secondary" className="w-full" icon="pause" disabled={busy}
+                        onClick={() => void power('/api/v1/cloudPhone/powerOff', 'Powered off')}
+                      >
+                        Power off
+                      </Button>
+                      <p className="pt-1 text-[0.72rem] leading-relaxed text-ink-500">
+                        Minutes are spent while the device is on. Powering off stops the meter.
+                      </p>
+                    </div>
+
+                    <details className="rounded-xl border border-ink-800 bg-ink-950/40 p-4">
+                      <summary className="cursor-pointer list-none text-[0.78rem] text-ink-500 hover:text-ink-300">
+                        Trouble loading?
+                      </summary>
+                      <div className="mt-3 space-y-2.5">
+                        <p className="text-[0.76rem] leading-relaxed text-ink-400">
+                          If the stream asks for a password, it is this one. Reconnecting after the
+                          device sleeps is normal.
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-lg bg-ink-900 px-2.5 py-1.5 font-mono text-[0.76rem] text-ink-100">
+                            {screen.code}
+                          </span>
+                          <CopyButton text={screen.code} label="Copy" />
+                        </div>
+                      </div>
+                    </details>
                   </div>
-                </>
+                </div>
               ) : (
                 <div className="flex flex-col items-center py-6">
                   <PhoneFrame className="w-52" />
@@ -726,7 +822,7 @@ function PhoneDrawer({
                       {screenError}
                     </p>
                   )}
-                  <Button className="mt-5" icon="monitor" loading={busy} onClick={openScreen}>
+                  <Button className="mt-5" icon="monitor" loading={busy} onClick={() => void openScreen()}>
                     Open the live screen
                   </Button>
                 </div>
