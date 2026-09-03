@@ -495,6 +495,12 @@ export const api = {
     }),
   testConfig: (what: 'cloud' | 'assistant' | 'bsc' | 'tron') =>
     apiPost<{ ok: boolean; message: string }>(`/api/admin/test/${what}`),
+  checkIntegration: () =>
+    apiPost<{
+      ok: boolean
+      summary: string
+      steps: { label: string; ok: boolean; detail: string }[]
+    }>('/api/admin/check-integration'),
   removeDemo: () =>
     apiPost<{ removed: boolean; phones: number; message: string; health: HealthCheck[] }>(
       '/api/admin/remove-demo'),

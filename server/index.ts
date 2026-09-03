@@ -31,8 +31,8 @@ import {
 import { resourceRoutes } from './routes-resources.js'
 import { describeSettings, setting, updateSettings } from './settings.js'
 import {
-  adminUser, health, isAdmin, providerOptions, removeDemo, testAssistant, testChain,
-  testUpstream,
+  adminUser, checkIntegration, health, isAdmin, providerOptions, removeDemo,
+  testAssistant, testChain, testUpstream,
 } from './admin.js'
 import {
   API_SCOPES, InputError, acceptInvite, consumeResetToken, createApiKey, findInvite,
@@ -274,6 +274,18 @@ app.post('/api/admin/remove-demo', requireAdmin, (_req, res) => {
       : 'There is no demo account on this install.',
     health: health(),
   }))
+})
+
+/**
+ * Walk the whole device integration, read-only. Costs no runtime minutes, which
+ * matters when the account being tested is a short trial.
+ */
+app.post('/api/admin/check-integration', requireAdmin, async (req, res) => {
+  try {
+    res.json(envelope(await checkIntegration(req.user!)))
+  } catch (err) {
+    errorOut(res, 502, err instanceof Error ? err.message : 'The check could not run')
+  }
 })
 
 /** Prove a credential works, rather than leaving the operator to guess. */

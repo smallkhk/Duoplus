@@ -10,7 +10,10 @@
 import { db, mutate, type User } from './store.js'
 import { DEMO_EMAIL } from './seed.js'
 import { chainEnabled, merchantAddress, paymentWarnings, type ChainId } from './crypto.js'
-import { upstreamBase, upstreamConfigured, upstreamKey } from './fleet.js'
+import {
+  cloudCall, listProxies, upstreamBase, upstreamConfigured, upstreamKey,
+} from './fleet.js'
+import { PhoneStatus, type CloudPhone } from '../src/lib/duoplus/types.js'
 import { PROVIDERS, resolveProvider } from './providers.js'
 import { setting } from './settings.js'
 
@@ -205,6 +208,154 @@ export async function testUpstream(): Promise<TestResult> {
     return { ok: false, message: body.message || `The provider rejected the call (code ${body.code}).` }
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : 'Could not reach the provider.' }
+  }
+}
+
+/* -------------------------- integration check ---------------------------- */
+
+export interface IntegrationStep {
+  label: string
+  ok: boolean
+  detail: string
+}
+
+export interface IntegrationReport {
+  ok: boolean
+  steps: IntegrationStep[]
+  summary: string
+}
+
+/**
+ * Prove the device integration end to end without powering anything on.
+ *
+ * Every call here is a read. Runtime minutes are only consumed while a device
+ * is powered on, so an operator can confirm the whole path — credentials,
+ * devices, proxies, groups and the shape MADOVA normalises them into — while
+ * spending none of a trial allowance. Booting a phone is the one step that
+ * costs, and it is deliberately not part of this.
+ */
+export async function checkIntegration(user: User): Promise<IntegrationReport> {
+  const steps: IntegrationStep[] = []
+
+  if (!upstreamConfigured()) {
+    return {
+      ok: false,
+      steps: [{
+        label: 'Provider key',
+        ok: false,
+        detail: 'No key is set, so devices come from MADOVA’s own engine. '
+          + 'Everything works, but nothing here is a real handset.',
+      }],
+      summary: 'Not connected to a provider.',
+    }
+  }
+
+  /* 1 — credentials. */
+  const auth = await testUpstream()
+  steps.push({ label: 'Provider key', ok: auth.ok, detail: auth.message })
+  if (!auth.ok) {
+    return { ok: false, steps, summary: 'The provider would not accept the key — nothing else can work until that does.' }
+  }
+
+  /* 2 — devices, and the shape they arrive in. */
+  try {
+    const reply = await cloudCall(user, '/api/v1/cloudPhone/list', { page: 1, pagesize: 100 })
+    if (reply.code !== 200) throw new Error(reply.message || `code ${reply.code}`)
+    const list = ((reply.data as { list?: unknown })?.list ?? []) as CloudPhone[]
+    const unconfigured = list.filter((p) => p.status === PhoneStatus.NotConfigured)
+    const withProxy = list.filter((p) => p.proxy_id).length
+
+    steps.push({
+      label: 'Devices',
+      ok: true,
+      detail: list.length === 0
+        ? 'The provider account has no devices yet.'
+        : `${list.length} device${list.length === 1 ? '' : 's'} read back, `
+          + `${withProxy} with an exit attached`
+          + (unconfigured.length > 0
+            ? ` — ${unconfigured.length} still reporting "Not configured".`
+            : '.'),
+    })
+
+    /* A device missing these is what used to blank the console. */
+    const sample = list[0]
+    if (sample) {
+      const complete = Boolean(sample.device?.model) && Array.isArray(sample.group)
+      steps.push({
+        label: 'Device shape',
+        ok: true,
+        detail: complete
+          ? 'The provider sends complete records; nothing had to be filled in.'
+          : 'The provider omits some fields. MADOVA fills them in, so the console renders '
+            + 'them as “—” rather than failing.',
+      })
+    }
+
+    if (unconfigured.length > 0) {
+      steps.push({
+        label: 'Ready to boot',
+        ok: false,
+        detail: `${unconfigured.length} device${unconfigured.length === 1 ? '' : 's'} cannot start `
+          + 'until an exit is attached. Open one under Cloud phones and attach a proxy — '
+          + 'that costs no runtime.',
+      })
+    }
+  } catch (err) {
+    steps.push({
+      label: 'Devices',
+      ok: false,
+      detail: err instanceof Error ? err.message : 'Could not read the device list.',
+    })
+  }
+
+  /* 3 — proxies, which are what make a device usable. */
+  try {
+    const { proxies } = await listProxies(user)
+    steps.push({
+      label: 'Proxies',
+      ok: proxies.length > 0,
+      detail: proxies.length > 0
+        ? `${proxies.length} available to attach: ${proxies.slice(0, 3).map((p) => p.name).join(', ')}`
+          + (proxies.length > 3 ? '…' : '')
+        : 'None on the provider account. A device cannot start without one — add a proxy in the '
+          + 'provider’s dashboard and it will appear here.',
+    })
+  } catch (err) {
+    steps.push({
+      label: 'Proxies',
+      ok: false,
+      detail: err instanceof Error ? err.message : 'Could not read the proxy list.',
+    })
+  }
+
+  /* 4 — groups, so the console's filters and automation have something to address. */
+  try {
+    const reply = await cloudCall(user, '/api/v1/cloudPhone/groupList', { page: 1 })
+    const list = ((reply.data as { list?: unknown })?.list ?? []) as unknown[]
+    steps.push({
+      label: 'Groups',
+      ok: reply.code === 200,
+      detail: reply.code === 200
+        ? `${list.length} group${list.length === 1 ? '' : 's'} read back.`
+        : reply.message,
+    })
+  } catch (err) {
+    steps.push({
+      label: 'Groups',
+      ok: false,
+      detail: err instanceof Error ? err.message : 'Could not read the group list.',
+    })
+  }
+
+  const failed = steps.filter((s) => !s.ok)
+  return {
+    ok: failed.length === 0,
+    steps,
+    summary: failed.length === 0
+      ? 'Everything the integration needs is working. No runtime was used — powering a device on '
+        + 'is the only thing that spends minutes.'
+      : `${failed.length} thing${failed.length === 1 ? '' : 's'} to sort out. `
+        + 'None of this used any runtime.',
   }
 }
 

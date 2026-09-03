@@ -51,6 +51,13 @@ export function Admin() {
   const [keyName, setKeyName] = useState('')
   const [keyScopes, setKeyScopes] = useState<string[]>(['phones:read'])
   const [issued, setIssued] = useState<{ key: ApiKeyRecord; secret: string } | null>(null)
+
+  const [checking, setChecking] = useState(false)
+  const [integration, setIntegration] = useState<{
+    ok: boolean
+    summary: string
+    steps: { label: string; ok: boolean; detail: string }[]
+  } | null>(null)
   const [revoking, setRevoking] = useState<ApiKeyRecord | null>(null)
 
   const load = useCallback(() => {
@@ -137,6 +144,17 @@ export function Admin() {
 
   const demoCheck = settings?.health.find((c) => c.id === 'demo') ?? null
 
+  const runIntegration = async () => {
+    setChecking(true)
+    try {
+      setIntegration(await api.checkIntegration())
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'The check could not run.', 'danger')
+    } finally {
+      setChecking(false)
+    }
+  }
+
   const purgeDemo = async () => {
     setSaving('demo')
     try {
@@ -181,6 +199,54 @@ export function Admin() {
           </div>
         </Card>
       )}
+
+      {/* end-to-end device check */}
+      <Card className="mb-4 p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex min-w-0 gap-3.5">
+            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-ink-800 text-brand-300">
+              <Icon name="cpu" className="size-4" />
+            </span>
+            <div className="min-w-0">
+              <h2 className="text-[0.95rem] font-semibold text-ink-50">Check the device integration</h2>
+              <p className="mt-1 max-w-xl text-[0.82rem] leading-relaxed text-ink-400">
+                Reads your provider account end to end — credentials, devices, proxies and groups —
+                and reports what it found. Every call is a read, so this spends{' '}
+                <span className="text-ink-200">no runtime minutes</span>. Only powering a device on
+                costs those.
+              </p>
+            </div>
+          </div>
+          <Button variant="secondary" loading={checking} onClick={runIntegration}>
+            Run the check
+          </Button>
+        </div>
+
+        {integration && (
+          <div className="mt-5 space-y-2.5">
+            {integration.steps.map((step, i) => (
+              <div
+                key={`${step.label}-${i}`}
+                className="flex flex-wrap items-start gap-3 rounded-lg bg-ink-950/60 px-4 py-3 ring-1 ring-inset ring-ink-800"
+              >
+                <Badge tone={step.ok ? 'ok' : 'warn'}>{step.ok ? 'Pass' : 'Action'}</Badge>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[0.84rem] font-medium text-ink-100">{step.label}</span>
+                  <span className="mt-0.5 block text-[0.78rem] leading-relaxed text-ink-400">{step.detail}</span>
+                </span>
+              </div>
+            ))}
+            <p className={cx(
+              'rounded-lg border p-3.5 text-[0.8rem] leading-relaxed',
+              integration.ok
+                ? 'border-ok/30 bg-ok/8 text-ink-200'
+                : 'border-warn/30 bg-warn/8 text-ink-200',
+            )}>
+              {integration.summary}
+            </p>
+          </div>
+        )}
+      </Card>
 
       {/* what works right now */}
       <Card className="mb-4 p-6">
