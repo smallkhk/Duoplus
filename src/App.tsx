@@ -15,6 +15,7 @@ import { Knowledge } from '@/pages/marketing/Knowledge'
 import { Legal } from '@/pages/marketing/Legal'
 import { NotFound } from '@/pages/marketing/NotFound'
 
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { Login, Register } from '@/pages/auth/Auth'
 import { Join } from '@/pages/auth/Join'
 import { Reset } from '@/pages/auth/Reset'
@@ -38,42 +39,45 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <ToastHost>
-          <Routes>
-            <Route element={<MarketingLayout />}>
-              <Route index element={<Home />} />
-              <Route path="features" element={<Features />} />
-              <Route path="solutions" element={<Solutions />} />
-              <Route path="pricing" element={<Pricing />} />
-              <Route path="knowledge" element={<Knowledge />} />
-              <Route path="download" element={<Download />} />
-              <Route path="contact" element={<Contact />} />
-              <Route path="legal" element={<Navigate to="/legal/terms" replace />} />
-              <Route path="legal/:doc" element={<Legal />} />
-              <Route path="*" element={<NotFound />} />
-            </Route>
+          {/* One page failing must never take the whole site down with it. */}
+          <ErrorBoundary>
+            <Routes>
+              <Route element={<MarketingLayout />}>
+                <Route index element={<Home />} />
+                <Route path="features" element={<Features />} />
+                <Route path="solutions" element={<Solutions />} />
+                <Route path="pricing" element={<Pricing />} />
+                <Route path="knowledge" element={<Knowledge />} />
+                <Route path="download" element={<Download />} />
+                <Route path="contact" element={<Contact />} />
+                <Route path="legal" element={<Navigate to="/legal/terms" replace />} />
+                <Route path="legal/:doc" element={<Legal />} />
+                <Route path="*" element={<NotFound />} />
+              </Route>
 
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/reset" element={<Reset />} />
-            <Route path="/join" element={<Join />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/reset" element={<Reset />} />
+              <Route path="/join" element={<Join />} />
 
-            <Route path="/console" element={<RequireAuth><ConsoleLayout /></RequireAuth>}>
-              <Route index element={<Overview />} />
-              <Route path="phones" element={<Phones />} />
-              <Route path="store" element={<Store />} />
-              <Route path="groups" element={<Groups />} />
-              <Route path="proxies" element={<Proxies />} />
-              <Route path="apps" element={<Apps />} />
-              <Route path="files" element={<Files />} />
-              <Route path="numbers" element={<Numbers />} />
-              <Route path="automation" element={<Automation />} />
-              <Route path="team" element={<Team />} />
-              <Route path="billing" element={<Billing />} />
-              <Route path="settings" element={<Settings />} />
-              <Route path="admin" element={<Admin />} />
-              <Route path="*" element={<Navigate to="/console" replace />} />
-            </Route>
-          </Routes>
+              <Route path="/console" element={<RequireAuth><ConsoleLayout /></RequireAuth>}>
+                <Route index element={<Overview />} />
+                <Route path="phones" element={<Phones />} />
+                <Route path="store" element={<Store />} />
+                <Route path="groups" element={<Groups />} />
+                <Route path="proxies" element={<Proxies />} />
+                <Route path="apps" element={<Apps />} />
+                <Route path="files" element={<Files />} />
+                <Route path="numbers" element={<Numbers />} />
+                <Route path="automation" element={<Automation />} />
+                <Route path="team" element={<Team />} />
+                <Route path="billing" element={<Billing />} />
+                <Route path="settings" element={<Settings />} />
+                <Route path="admin" element={<Admin />} />
+                <Route path="*" element={<Navigate to="/console" replace />} />
+              </Route>
+            </Routes>
+          </ErrorBoundary>
 
           {/* Support is reachable from every page, signed in or not. */}
           <ChatWidget />

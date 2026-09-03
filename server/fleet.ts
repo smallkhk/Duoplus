@@ -814,6 +814,73 @@ export function localCall(user: User, path: string, body: Record<string, any>): 
   }
 }
 
+/**
+ * Fill in whatever the upstream left out.
+ *
+ * The console renders against the CloudPhone contract — `phone.device.model`,
+ * `phone.group.map(…)` and so on. The local engine always produces a complete
+ * record, but a real provider sends only the fields it has, and one missing
+ * object is enough to throw during render and blank the whole page. Normalising
+ * here means every consumer — console, assistant and public API — sees the same
+ * shape no matter where the data came from.
+ */
+export function normalisePhone(raw: Record<string, any>): CloudPhone {
+  const d = (raw?.device ?? {}) as Record<string, any>
+  const str = (v: unknown, fallback = '') => (v === undefined || v === null ? fallback : String(v))
+
+  return {
+    id: str(raw?.id ?? raw?.image_id),
+    name: str(raw?.name, str(raw?.id)),
+    status: Number(raw?.status ?? PhoneStatus.PoweredOff),
+    os: str(raw?.os, 'Android'),
+    size: str(raw?.size, '—'),
+    created_at: str(raw?.created_at, '—'),
+    expired_at: str(raw?.expired_at, '—'),
+    ip: str(raw?.ip, '—'),
+    area: str(raw?.area, '—'),
+    remark: str(raw?.remark),
+    adb: str(raw?.adb),
+    adb_password: str(raw?.adb_password),
+    /* An ungrouped device still has to be an array — the UI maps over it. */
+    group: Array.isArray(raw?.group)
+      ? raw.group.map((g: any) => ({ id: str(g?.id), name: str(g?.name, 'Ungrouped') }))
+      : [],
+    http_status: Number(raw?.http_status ?? 0),
+    region: str(raw?.region),
+    start_phone_type: Number(raw?.start_phone_type ?? 1),
+    share_status: Number(raw?.share_status ?? 2),
+    renewal_status: Number(raw?.renewal_status ?? 0),
+    proxy_id: str(raw?.proxy_id),
+    tag_ids: Array.isArray(raw?.tag_ids) ? raw.tag_ids.map((t: any) => str(t)) : [],
+    device: {
+      model: str(d.model, '—'),
+      imei: str(d.imei, '—'),
+      serialno: str(d.serialno, '—'),
+      android_id: str(d.android_id, '—'),
+      gaid: str(d.gaid, '—'),
+      dpi_name: str(d.dpi_name, '—'),
+      timezone: str(d.timezone, '—'),
+      language: str(d.language, '—'),
+      longitude: str(d.longitude, '—'),
+      latitude: str(d.latitude, '—'),
+      sim_country: str(d.sim_country, '—'),
+      sim_operator: str(d.sim_operator, '—'),
+      wifi_name: str(d.wifi_name, '—'),
+      bluetooth_name: str(d.bluetooth_name, '—'),
+    },
+  }
+}
+
+/** Paths whose payload is a page of cloud phones needing the shape guarantee. */
+const PHONE_LIST_PATHS = new Set(['/api/v1/cloudPhone/list'])
+
+function normaliseUpstream(path: string, reply: ApiEnvelope<any>): ApiEnvelope<any> {
+  if (reply.code !== 200 || !PHONE_LIST_PATHS.has(path)) return reply
+  const list = (reply.data as { list?: unknown })?.list
+  if (!Array.isArray(list)) return reply
+  return { ...reply, data: { ...reply.data, list: list.map(normalisePhone) } }
+}
+
 /** Forward a call to the real upstream API with the server-held key. */
 async function upstreamCall(path: string, body: Record<string, any>, lang: string): Promise<ApiEnvelope<any>> {
   const res = await fetch(`${upstreamBase()}${path}`, {
@@ -874,6 +941,8 @@ export async function cloudCall(
   lang = 'en',
 ): Promise<ApiEnvelope<any>> {
   if (!ALLOWED_PATHS.has(path)) return fail(404, `Unknown endpoint: ${path}`)
-  if (upstreamConfigured()) return serialise(() => upstreamCall(path, body, lang))
+  if (upstreamConfigured()) {
+    return serialise(async () => normaliseUpstream(path, await upstreamCall(path, body, lang)))
+  }
   return localCall(user, path, body)
 }

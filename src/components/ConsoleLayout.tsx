@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { Logo, LogoMark } from './Logo'
 import { Icon } from './Icon'
 import { Badge, Input, cx } from './ui'
+import { ErrorBoundary } from './ErrorBoundary'
 import { useAuth } from '@/lib/auth'
 
 type NavItem = { to: string; label: string; icon: string; end?: boolean; adminOnly?: boolean }
@@ -240,7 +241,12 @@ export function ConsoleLayout() {
         </header>
 
         <main className="flex-1 px-4 py-6 sm:px-6 sm:py-8">
-          <Outlet />
+          {/* Scoped to the page, so a failure leaves the sidebar usable and the
+              customer can navigate somewhere that works. `key` resets it on
+              navigation, so an error on one page does not stick to the next. */}
+          <ErrorBoundary key={location.pathname} label="This page hit an error">
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>
