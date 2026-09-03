@@ -81,7 +81,7 @@ Powering a phone off never wipes it. Only a reskin or reset replaces the environ
 
 - The console. Select phones in the fleet table and use the bulk bar: Power on, Power off, Restart, Run ADB, Renew.
 - The assistant. Ask it in plain language — "restart TikTok-US-014", "power off everything in the Airdrop Farm group". It performs the action and reports what changed.
-- The API. POST to /api/v1/cloudPhone/batchPowerOn, batchPowerOff or batchRestart with up to 20 device IDs.
+- The API. POST to /api/v1/cloudPhone/powerOn, powerOff or restart with up to 20 device IDs.
 - ADB. Connect to the address on the device's Overview tab and drive it with a shell.
 
 Batch operations take at most 20 devices per call. Larger selections are chunked automatically by the console and the assistant.`,

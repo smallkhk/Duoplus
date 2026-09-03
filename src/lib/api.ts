@@ -439,6 +439,10 @@ export const api = {
   deleteProxy: (id: string) => apiDelete<{ detached: number }>(`/api/proxies/${id}`),
   bindProxy: (id: string, phoneIds: string[], dns = true) =>
     apiPost<{ result: BatchOutcome }>(`/api/proxies/${id}/bind`, { phone_ids: phoneIds, dns }),
+  /** Configure devices with an endpoint the customer types in themselves. */
+  attachOwnProxy: (phoneIds: string[], input: {
+    host: string; port: string; user?: string; password?: string; protocol?: string; dns?: boolean
+  }) => apiPost<{ result: BatchOutcome }>('/api/proxies/direct', { phone_ids: phoneIds, ...input }),
   unbindProxy: (phoneIds: string[]) =>
     apiPost<{ result: BatchOutcome }>('/api/proxies/unbind', { phone_ids: phoneIds }),
 

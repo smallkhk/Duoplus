@@ -172,7 +172,7 @@ function FeatureArt({ slug }: { slug: string }) {
 )
 
 await madova.post(
-  '/api/v1/cloudPhone/batchPowerOn',
+  '/api/v1/cloudPhone/powerOn',
   { image_ids: fleet.list.map(p => p.id) }
 )
 

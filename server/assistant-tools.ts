@@ -229,9 +229,9 @@ async function resolveTargets(
 }
 
 const ACTION_PATH = {
-  power_on: '/api/v1/cloudPhone/batchPowerOn',
-  power_off: '/api/v1/cloudPhone/batchPowerOff',
-  restart: '/api/v1/cloudPhone/batchRestart',
+  power_on: '/api/v1/cloudPhone/powerOn',
+  power_off: '/api/v1/cloudPhone/powerOff',
+  restart: '/api/v1/cloudPhone/restart',
 } as const
 
 const ACTION_VERB = { power_on: 'Powered on', power_off: 'Powered off', restart: 'Restarted' } as const

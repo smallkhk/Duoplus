@@ -7,8 +7,8 @@ import express from 'express'
 import { requireAuth, requireRole } from './auth.js'
 import {
   appsOf, assignGroup, bindProxy, checkProxy, cloudCall, createGroup, createProxy,
-  deleteGroup, deleteProxy, groupsOf, importProxies, installApp, listProxies,
-  uninstallApp, updateGroup, upstreamConfigured,
+  deleteGroup, deleteProxy, groupsOf, importProxies, initProxyDirect, installApp,
+  listProxies, uninstallApp, updateGroup, upstreamConfigured,
 } from './fleet.js'
 import {
   InputError, MAX_FILE_BYTES, TASK_ACTIONS, TASK_TRIGGERS, TEAM_ROLES,
@@ -151,6 +151,19 @@ resourceRoutes.post('/proxies/:id/bind', operator, (req, res) =>
     ),
   })))
 
+/** Configure a device with an endpoint the customer supplies themselves. */
+resourceRoutes.post('/proxies/direct', operator, (req, res) =>
+  handleAsync(res, async () => ({
+    result: await initProxyDirect(req.user!, ids(req.body?.phone_ids), {
+      host: String(req.body?.host ?? ''),
+      port: String(req.body?.port ?? ''),
+      user: req.body?.user ? String(req.body.user) : undefined,
+      password: req.body?.password ? String(req.body.password) : undefined,
+      protocol: req.body?.protocol ? String(req.body.protocol) : undefined,
+      dns: req.body?.dns !== false,
+    }),
+  })))
+
 resourceRoutes.post('/proxies/unbind', operator, (req, res) =>
   handleAsync(res, async () => ({
     result: await bindProxy(req.user!, ids(req.body?.phone_ids), ''),
@@ -289,9 +302,9 @@ resourceRoutes.post('/tasks/:id/run', operator, async (req, res) => {
     const task = taskById(req.user!.id, req.params.id)
     if (!task) throw new InputError('Task not found.', 404)
 
-    const path = task.action === 'power_on' ? '/api/v1/cloudPhone/batchPowerOn'
-      : task.action === 'power_off' ? '/api/v1/cloudPhone/batchPowerOff'
-      : task.action === 'restart' ? '/api/v1/cloudPhone/batchRestart'
+    const path = task.action === 'power_on' ? '/api/v1/cloudPhone/powerOn'
+      : task.action === 'power_off' ? '/api/v1/cloudPhone/powerOff'
+      : task.action === 'restart' ? '/api/v1/cloudPhone/restart'
       : '/api/v1/cloudPhone/command'
 
     /* Batch endpoints cap at 20 devices per call, so a large group runs in waves. */

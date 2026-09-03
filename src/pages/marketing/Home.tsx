@@ -119,7 +119,7 @@ function HeroArt() {
             <span className="block h-full w-full rounded-full bg-gradient-to-r from-brand-500 to-accent-400" />
           </span>
           <span className="block truncate font-mono text-[0.62rem] text-ink-500">
-            POST /api/v1/cloudPhone/batchPowerOn
+            POST /api/v1/cloudPhone/powerOn
           </span>
         </span>
         <span className="shrink-0 border-l border-ink-800 pl-4">

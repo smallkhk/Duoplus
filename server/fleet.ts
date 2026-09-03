@@ -505,6 +505,67 @@ export async function listProxies(user: User): Promise<{
   return { proxies: Array.isArray(list) ? list.map(normaliseProxy) : [], managed: true }
 }
 
+/**
+ * Configure a device with a proxy the customer supplies directly.
+ *
+ * `initProxy` accepts host and port as well as an existing id, so a customer
+ * can bring their own endpoint without it having to be added to the provider's
+ * dashboard first. That is the difference between a customer configuring their
+ * own device and having to ask the operator to do it for them.
+ */
+export async function initProxyDirect(user: User, phoneIds: string[], input: {
+  host: string
+  port: string | number
+  user?: string
+  password?: string
+  protocol?: string
+  dns?: boolean
+}): Promise<BatchResult> {
+  if (!upstreamConfigured()) {
+    /* The local engine has no notion of a raw endpoint, so record it as a
+       proxy on the account and bind that — same outcome, same shape. */
+    const proxy = createProxy(user.id, input)
+    return bindProxy(user, phoneIds, proxy.id, input.dns !== false)
+  }
+
+  const host = String(input.host ?? '').trim()
+  const port = String(input.port ?? '').trim()
+  if (!host || !port) throw new Error('A proxy needs a host and a port.')
+  const protocol = String(input.protocol ?? 'socks5').toLowerCase()
+  if (!PROTOCOLS.has(protocol)) throw new Error(`"${input.protocol}" is not a supported protocol.`)
+
+  const result: BatchResult = { success: [], fail: [], fail_reason: {} }
+  for (let i = 0; i < phoneIds.length; i += 20) {
+    const batch = phoneIds.slice(i, i + 20)
+    const reply = await cloudCall(user, '/api/v1/cloudPhone/initProxy', {
+      images: batch.map((image_id) => ({
+        image_id,
+        ip_scan_channel: 'ip2location',
+        proxy: {
+          host,
+          port,
+          user: String(input.user ?? ''),
+          password: String(input.password ?? ''),
+          protocol,
+          dns: input.dns === false ? 2 : 1,
+        },
+      })),
+    })
+    if (reply.code !== 200) {
+      for (const id of batch) {
+        result.fail.push(id)
+        result.fail_reason[id] = reply.message || 'The provider refused the change'
+      }
+      continue
+    }
+    const r = reply.data as BatchResult
+    result.success.push(...(r?.success ?? batch))
+    result.fail.push(...(r?.fail ?? []))
+    Object.assign(result.fail_reason, r?.fail_reason ?? {})
+  }
+  return result
+}
+
 /** Fill in whatever the provider's proxy list left out, as with devices. */
 export function normaliseProxy(raw: Record<string, any>): Proxy {
   const str = (v: unknown, fallback = '') => (v === undefined || v === null ? fallback : String(v))
@@ -686,9 +747,12 @@ export async function bindProxy(
     const result: BatchResult = { success: [], fail: [], fail_reason: {} }
     for (let i = 0; i < phoneIds.length; i += 20) {
       const batch = phoneIds.slice(i, i + 20)
-      const reply = await cloudCall(user, '/api/v1/cloudPhone/update', {
+      /* `initProxy` is what takes a device out of "Not configured" — `update`
+         only edits one that is already set up. */
+      const reply = await cloudCall(user, '/api/v1/cloudPhone/initProxy', {
         images: batch.map((image_id) => ({
           image_id,
+          ip_scan_channel: 'ip2location',
           /* An empty id detaches; dns 1 routes device DNS through the tunnel. */
           proxy: { id: proxyId, dns: dns ? 1 : 2 },
         })),
@@ -819,13 +883,13 @@ export function localCall(user: User, path: string, body: Record<string, any>): 
     case '/api/v1/cloudPhone/groupList':
       return ok(paginate(groupsOf(user.id), page, 200))
 
-    case '/api/v1/cloudPhone/batchPowerOn':
+    case '/api/v1/cloudPhone/powerOn':
       return ok(applyStatus(user.id, ids, PhoneStatus.PoweringOn))
 
-    case '/api/v1/cloudPhone/batchPowerOff':
+    case '/api/v1/cloudPhone/powerOff':
       return ok(applyStatus(user.id, ids, PhoneStatus.PoweredOff))
 
-    case '/api/v1/cloudPhone/batchRestart':
+    case '/api/v1/cloudPhone/restart':
       return ok(applyStatus(user.id, ids, PhoneStatus.PoweringOn))
 
     case '/api/v1/cloudPhone/batchRoot':
@@ -915,7 +979,13 @@ export function localCall(user: User, path: string, body: Record<string, any>): 
  */
 export function normalisePhone(raw: Record<string, any>): CloudPhone {
   const d = (raw?.device ?? {}) as Record<string, any>
-  const str = (v: unknown, fallback = '') => (v === undefined || v === null ? fallback : String(v))
+  /* An empty string is as absent as undefined here — the console renders it,
+     and a blank cell reads as a bug rather than as "the provider didn't say". */
+  const str = (v: unknown, fallback = '') => {
+    if (v === undefined || v === null) return fallback
+    const out = String(v).trim()
+    return out === '' ? fallback : out
+  }
 
   return {
     id: str(raw?.id ?? raw?.image_id),
@@ -923,8 +993,8 @@ export function normalisePhone(raw: Record<string, any>): CloudPhone {
     status: Number(raw?.status ?? PhoneStatus.PoweredOff),
     os: str(raw?.os, 'Android'),
     size: str(raw?.size, '—'),
-    created_at: str(raw?.created_at, '—'),
-    expired_at: str(raw?.expired_at, '—'),
+    created_at: when(raw?.created_at),
+    expired_at: when(raw?.expired_at),
     ip: str(raw?.ip, '—'),
     area: str(raw?.area, '—'),
     remark: str(raw?.remark),
@@ -958,6 +1028,25 @@ export function normalisePhone(raw: Record<string, any>): CloudPhone {
       bluetooth_name: str(d.bluetooth_name, '—'),
     },
   }
+}
+
+/**
+ * The provider sends times as Unix seconds; the console shows them verbatim.
+ * Left alone that puts "1788383444" in front of a customer where a date
+ * belongs, so epoch values are formatted and anything already readable is
+ * passed through untouched.
+ */
+function when(value: unknown): string {
+  if (value === undefined || value === null || value === '') return '—'
+  const raw = String(value).trim()
+  if (/^\d{9,13}$/.test(raw)) {
+    const n = Number(raw)
+    /* Ten digits is seconds, thirteen is milliseconds. */
+    const ms = raw.length <= 10 ? n * 1000 : n
+    const date = new Date(ms)
+    if (!Number.isNaN(date.getTime())) return date.toISOString().slice(0, 19).replace('T', ' ')
+  }
+  return raw
 }
 
 /** Paths whose payload is a page of cloud phones needing the shape guarantee. */
@@ -1005,14 +1094,22 @@ function serialise<T>(task: () => Promise<T>): Promise<T> {
   return next
 }
 
+/*
+ * Paths as the provider actually documents them. Power and restart are
+ * `powerOn` / `powerOff` / `restart` — not the `batch…` names the batch limit
+ * suggests — and calling the wrong one returns "API endpoint error. Check the
+ * endpoint name, path spelling", which reads like a client bug rather than a
+ * wrong URL. Root is genuinely `batchRoot`; the naming is simply inconsistent.
+ */
 export const ALLOWED_PATHS = new Set([
   '/api/v1/cloudPhone/list',
   '/api/v1/cloudPhone/groupList',
-  '/api/v1/cloudPhone/batchPowerOn',
-  '/api/v1/cloudPhone/batchPowerOff',
-  '/api/v1/cloudPhone/batchRestart',
+  '/api/v1/cloudPhone/powerOn',
+  '/api/v1/cloudPhone/powerOff',
+  '/api/v1/cloudPhone/restart',
   '/api/v1/cloudPhone/batchRoot',
   '/api/v1/cloudPhone/update',
+  '/api/v1/cloudPhone/initProxy',
   '/api/v1/cloudPhone/command',
   '/api/v1/cloudPhone/renewal',
   '/api/v1/proxy/list',

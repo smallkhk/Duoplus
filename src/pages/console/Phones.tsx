@@ -237,15 +237,15 @@ export function Phones() {
             selected
           </span>
           <Button size="sm" variant="secondary" icon="power" disabled={!!busy}
-            onClick={() => void runBatch('/api/v1/cloudPhone/batchPowerOn', 'Powered on')}>
+            onClick={() => void runBatch('/api/v1/cloudPhone/powerOn', 'Powered on')}>
             {busy === 'Powered on' ? 'Powering on…' : 'Power on'}
           </Button>
           <Button size="sm" variant="secondary" icon="pause" disabled={!!busy}
-            onClick={() => void runBatch('/api/v1/cloudPhone/batchPowerOff', 'Powered off')}>
+            onClick={() => void runBatch('/api/v1/cloudPhone/powerOff', 'Powered off')}>
             Power off
           </Button>
           <Button size="sm" variant="secondary" icon="restart" disabled={!!busy}
-            onClick={() => void runBatch('/api/v1/cloudPhone/batchRestart', 'Restarted')}>
+            onClick={() => void runBatch('/api/v1/cloudPhone/restart', 'Restarted')}>
             Restart
           </Button>
           <Button size="sm" variant="secondary" icon="terminal" disabled={!!busy} onClick={() => setAdbOpen(true)}>
@@ -433,6 +433,11 @@ function PhoneDrawer({
   const [busy, setBusy] = useState(false)
   const [proxyOpen, setProxyOpen] = useState(false)
   const [proxyPick, setProxyPick] = useState('')
+  /** 'list' picks one the provider holds; 'own' types an endpoint in. */
+  const [proxyMode, setProxyMode] = useState<'list' | 'own'>('list')
+  const [ownProxy, setOwnProxy] = useState({
+    protocol: 'socks5', host: '', port: '', user: '', password: '',
+  })
 
   useEffect(() => { setTab('overview') }, [phone?.id])
 
@@ -468,15 +473,19 @@ function PhoneDrawer({
   const attachProxy = async () => {
     setBusy(true)
     try {
-      const { result } = proxyPick
-        ? await api.bindProxy(proxyPick, [phone.id])
-        : await api.unbindProxy([phone.id])
+      const { result } = proxyMode === 'own'
+        ? await api.attachOwnProxy([phone.id], ownProxy)
+        : proxyPick
+          ? await api.bindProxy(proxyPick, [phone.id])
+          : await api.unbindProxy([phone.id])
       if (result.fail.length > 0) {
         throw new Error(result.fail_reason[result.fail[0]] ?? 'The provider refused the change')
       }
-      toast(proxyPick
-        ? `${(proxies ?? []).find((p) => p.id === proxyPick)?.name ?? 'Proxy'} attached to ${phone.name}.`
-        : `Proxy detached from ${phone.name}.`, 'ok')
+      toast(proxyMode === 'own'
+        ? `${ownProxy.host}:${ownProxy.port} attached to ${phone.name}.`
+        : proxyPick
+          ? `${(proxies ?? []).find((p) => p.id === proxyPick)?.name ?? 'Proxy'} attached to ${phone.name}.`
+          : `Proxy detached from ${phone.name}.`, 'ok')
       setProxyOpen(false)
       reloadProxies()
       onChanged()
@@ -589,25 +598,34 @@ function PhoneDrawer({
 
               <div>
                 <p className="mb-2 text-[0.72rem] font-semibold uppercase tracking-wider text-ink-500">ADB</p>
-                <div className="flex items-center gap-2 rounded-lg bg-ink-950/60 p-3.5 ring-1 ring-inset ring-ink-800">
-                  <code className="min-w-0 flex-1 truncate font-mono text-[0.78rem] text-ink-100">
-                    adb connect {phone.adb}
-                  </code>
-                  <CopyButton text={`adb connect ${phone.adb}`} />
-                </div>
+                {phone.adb ? (
+                  <div className="flex items-center gap-2 rounded-lg bg-ink-950/60 p-3.5 ring-1 ring-inset ring-ink-800">
+                    <code className="min-w-0 flex-1 truncate font-mono text-[0.78rem] text-ink-100">
+                      adb connect {phone.adb}
+                    </code>
+                    <CopyButton text={`adb connect ${phone.adb}`} />
+                  </div>
+                ) : (
+                  /* The provider only issues an address once the device is up, so
+                     printing "adb connect" with nothing after it is worse than
+                     saying why it is not there yet. */
+                  <p className="rounded-lg bg-ink-950/60 p-3.5 text-[0.8rem] leading-relaxed text-ink-500 ring-1 ring-inset ring-ink-800">
+                    An ADB address is issued once the device is powered on.
+                  </p>
+                )}
               </div>
 
               <div className="flex flex-wrap gap-2 border-t border-ink-800 pt-5">
                 <Button size="sm" icon="power" disabled={busy}
-                  onClick={() => void power('/api/v1/cloudPhone/batchPowerOn', 'Powered on')}>
+                  onClick={() => void power('/api/v1/cloudPhone/powerOn', 'Powered on')}>
                   Power on
                 </Button>
                 <Button size="sm" variant="secondary" icon="pause" disabled={busy}
-                  onClick={() => void power('/api/v1/cloudPhone/batchPowerOff', 'Powered off')}>
+                  onClick={() => void power('/api/v1/cloudPhone/powerOff', 'Powered off')}>
                   Power off
                 </Button>
                 <Button size="sm" variant="secondary" icon="restart" disabled={busy}
-                  onClick={() => void power('/api/v1/cloudPhone/batchRestart', 'Restarted')}>
+                  onClick={() => void power('/api/v1/cloudPhone/restart', 'Restarted')}>
                   Restart
                 </Button>
               </div>
@@ -672,35 +690,104 @@ function PhoneDrawer({
         footer={
           <>
             <Button variant="ghost" onClick={() => setProxyOpen(false)}>Cancel</Button>
-            <Button onClick={attachProxy} loading={busy}>
-              {proxyPick ? 'Attach proxy' : 'Detach proxy'}
+            <Button
+              onClick={attachProxy}
+              loading={busy}
+              disabled={proxyMode === 'own' && (!ownProxy.host.trim() || !ownProxy.port.trim())}
+            >
+              {proxyMode === 'own' || proxyPick ? 'Attach proxy' : 'Detach proxy'}
             </Button>
           </>
         }
       >
         <div className="space-y-5">
-          {(proxies ?? []).length === 0 ? (
-            <div className="flex items-start gap-2.5 rounded-lg border border-warn/30 bg-warn/5 p-3.5">
-              <Icon name="alert" className="mt-0.5 size-4 shrink-0 text-warn" />
-              <p className="text-[0.8rem] leading-relaxed text-ink-300">
-                {managed
-                  ? 'There are no proxies on your provider account yet. Add one in the provider’s '
-                    + 'dashboard and it will appear here — its API has no endpoint for creating them.'
-                  : 'No proxies on the account yet. Add one on the Proxies page first.'}
+          <div className="flex gap-1 rounded-lg bg-ink-950/60 p-1 ring-1 ring-inset ring-ink-800">
+            {([['list', 'Pick from the list'], ['own', 'Use my own']] as const).map(([id, label]) => (
+              <button
+                key={id}
+                onClick={() => setProxyMode(id)}
+                className={cx(
+                  'flex-1 rounded-md px-3 py-1.5 text-[0.8rem] font-medium transition-colors',
+                  proxyMode === id ? 'bg-ink-800 text-ink-50' : 'text-ink-400 hover:text-ink-100',
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {proxyMode === 'list' ? (
+            (proxies ?? []).length === 0 ? (
+              <div className="flex items-start gap-2.5 rounded-lg border border-warn/30 bg-warn/5 p-3.5">
+                <Icon name="alert" className="mt-0.5 size-4 shrink-0 text-warn" />
+                <p className="text-[0.8rem] leading-relaxed text-ink-300">
+                  No proxies on the account yet. Switch to <span className="text-ink-100">Use my own</span>{' '}
+                  and type an endpoint in — it does not have to be added anywhere first.
+                </p>
+              </div>
+            ) : (
+              <Field label="Proxy" hint="Device DNS is routed through the tunnel, which stops it resolving around the proxy.">
+                <Select value={proxyPick} onChange={(e) => setProxyPick(e.target.value)}>
+                  <option value="">No proxy — use the data centre exit</option>
+                  {(proxies ?? []).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} · {p.area} · {p.host}:{p.port}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )
+          ) : (
+            <div className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-[7rem_1fr_5.5rem]">
+                <Field label="Protocol">
+                  <Select
+                    value={ownProxy.protocol}
+                    onChange={(e) => setOwnProxy({ ...ownProxy, protocol: e.target.value })}
+                  >
+                    {['socks5', 'http', 'https'].map((x) => <option key={x}>{x}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Host">
+                  <Input
+                    value={ownProxy.host}
+                    onChange={(e) => setOwnProxy({ ...ownProxy, host: e.target.value })}
+                    placeholder="p.webshare.io"
+                    autoComplete="off"
+                  />
+                </Field>
+                <Field label="Port">
+                  <Input
+                    value={ownProxy.port}
+                    onChange={(e) => setOwnProxy({ ...ownProxy, port: e.target.value })}
+                    placeholder="80"
+                    autoComplete="off"
+                  />
+                </Field>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Username" hint="Leave both empty for an open proxy.">
+                  <Input
+                    value={ownProxy.user}
+                    onChange={(e) => setOwnProxy({ ...ownProxy, user: e.target.value })}
+                    autoComplete="off"
+                  />
+                </Field>
+                <Field label="Password">
+                  <Input
+                    type="password"
+                    value={ownProxy.password}
+                    onChange={(e) => setOwnProxy({ ...ownProxy, password: e.target.value })}
+                    autoComplete="off"
+                  />
+                </Field>
+              </div>
+              <p className="text-[0.78rem] leading-relaxed text-ink-500">
+                The endpoint is sent straight to the device and is not stored on your account.
               </p>
             </div>
-          ) : (
-            <Field label="Proxy" hint="Device DNS is routed through the tunnel, which stops it resolving around the proxy.">
-              <Select value={proxyPick} onChange={(e) => setProxyPick(e.target.value)}>
-                <option value="">No proxy — use the data centre exit</option>
-                {(proxies ?? []).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} · {p.area} · {p.host}:{p.port}
-                  </option>
-                ))}
-              </Select>
-            </Field>
           )}
+
           {needsProxy && (
             <p className="text-[0.8rem] leading-relaxed text-ink-400">
               The device reports <span className="text-ink-200">Not configured</span>. Attaching an
