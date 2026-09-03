@@ -135,6 +135,21 @@ export function Admin() {
     }
   }
 
+  const demoCheck = settings?.health.find((c) => c.id === 'demo') ?? null
+
+  const purgeDemo = async () => {
+    setSaving('demo')
+    try {
+      const result = await api.removeDemo()
+      setSettings((s) => (s ? { ...s, health: result.health } : s))
+      toast(result.message, 'ok')
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not remove the demo data.', 'danger')
+    } finally {
+      setSaving(null)
+    }
+  }
+
   const origin = typeof window === 'undefined' ? '' : window.location.origin
   const activeKeys = keys?.filter((k) => k.status === 'active') ?? []
 
@@ -144,6 +159,28 @@ export function Admin() {
         title="Site settings"
         lead="Everything MADOVA needs to take money and hand out phones. Saved here rather than in a file on the server, and applied on the next request — no restart, no shell."
       />
+
+      {demoCheck && (
+        <Card className="mb-4 border-danger/40 p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex min-w-0 gap-3.5">
+              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-danger/12 text-danger">
+                <Icon name="alert" className="size-4" />
+              </span>
+              <div className="min-w-0">
+                <h2 className="text-[0.95rem] font-semibold text-danger">Demo data is still here</h2>
+                <p className="mt-1 max-w-xl text-[0.82rem] leading-relaxed text-ink-300">
+                  {demoCheck.detail} Removing it deletes the demo login and every device it owns.
+                  Nothing of yours is touched.
+                </p>
+              </div>
+            </div>
+            <Button variant="danger" loading={saving === 'demo'} onClick={purgeDemo}>
+              Remove demo data
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {/* what works right now */}
       <Card className="mb-4 p-6">

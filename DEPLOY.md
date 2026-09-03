@@ -385,16 +385,21 @@ nothing is set here, and each field tells you which it is using.
 
 ### Step 3 — Remove the demo account
 
+Demo data is **off unless you ask for it** (`MADOVA_SEED_DEMO=true`), so a fresh install never has
+any and the sign-in page never offers a demo login. An install that predates that default may still
+be carrying the seeded account, in which case Site settings shows a red banner and a **Remove demo
+data** button. Press it — that deletes the demo login and its 148 fake devices, and nothing else.
+
+Over SSH instead, if you prefer:
+
 ```bash
 cd ~/madova
 source ~/nodevenv/madova/22/bin/activate
 npm run remove-demo
-echo 'MADOVA_SEED_DEMO=false' >> .env
 touch tmp/restart.txt
 ```
 
-Register your own account first — `remove-demo` warns if it would leave the database empty, because
-an empty database is re-seeded on the next start. The script writes a timestamped backup first.
+The script writes a timestamped backup first.
 
 ### Taking payment — how it settles
 

@@ -31,13 +31,14 @@ import {
 import { resourceRoutes } from './routes-resources.js'
 import { describeSettings, setting, updateSettings } from './settings.js'
 import {
-  adminUser, health, isAdmin, providerOptions, testAssistant, testChain, testUpstream,
+  adminUser, health, isAdmin, providerOptions, removeDemo, testAssistant, testChain,
+  testUpstream,
 } from './admin.js'
 import {
   API_SCOPES, InputError, acceptInvite, consumeResetToken, createApiKey, findInvite,
   issueResetToken, keysOf, revokeApiKey, userForApiKey,
 } from './resources.js'
-import { DEMO_EMAIL, grantTrialPhone, seed } from './seed.js'
+import { DEMO_EMAIL, demoEnabled, grantTrialPhone, seed } from './seed.js'
 import {
   db, findUserByEmail, mutate, nowIso, prefixedId, publicUser, type SupportThread,
 } from './store.js'
@@ -67,11 +68,14 @@ app.get('/api/meta', (_req, res) => {
     /* Whether a mail transport exists, so the console never promises an email
      * it cannot send. */
     mail: { configured: setting('smtp_url').length > 0 },
-    /* Whether the seeded demo account is still present, so the sign-in page can
-     * offer it only when it exists. */
+    /*
+     * The sign-in page offers the demo login only when demo mode is explicitly
+     * on AND the account exists. Existence alone is not enough: a live site
+     * that still carries the seeded account must never advertise it.
+     */
     demo_account: {
       email: DEMO_EMAIL,
-      available: Boolean(findUserByEmail(DEMO_EMAIL)),
+      available: demoEnabled() && Boolean(findUserByEmail(DEMO_EMAIL)),
     },
     /* No OAuth backend yet — the sign-in page hides providers it cannot honour. */
     oauth: { providers: [] as string[] },
@@ -258,6 +262,18 @@ app.delete('/api/admin/keys/:id', requireAdmin, (req, res) => {
   } catch (err) {
     errorOut(res, 400, err instanceof Error ? err.message : 'Could not revoke that key')
   }
+})
+
+/** Purge the seeded demo account and its fake fleet. */
+app.post('/api/admin/remove-demo', requireAdmin, (_req, res) => {
+  const result = removeDemo()
+  res.json(envelope({
+    ...result,
+    message: result.removed
+      ? `Demo account removed, along with ${result.phones} fake device${result.phones === 1 ? '' : 's'}.`
+      : 'There is no demo account on this install.',
+    health: health(),
+  }))
 })
 
 /** Prove a credential works, rather than leaving the operator to guess. */

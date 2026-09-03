@@ -495,6 +495,9 @@ export const api = {
     }),
   testConfig: (what: 'cloud' | 'assistant' | 'bsc' | 'tron') =>
     apiPost<{ ok: boolean; message: string }>(`/api/admin/test/${what}`),
+  removeDemo: () =>
+    apiPost<{ removed: boolean; phones: number; message: string; health: HealthCheck[] }>(
+      '/api/admin/remove-demo'),
   adminKeys: () => apiGet<{ keys: ApiKeyRecord[]; scopes: ApiScope[] }>('/api/admin/keys'),
   createAdminKey: (input: { name: string; scopes: string[] }) =>
     apiPost<{ key: ApiKeyRecord; secret: string }>('/api/admin/keys', input),

@@ -38,15 +38,22 @@ export function grantTrialPhone(user: User) {
   return phone
 }
 
+/** Demo data is off unless the operator asks for it, explicitly, by name. */
+export const demoEnabled = () =>
+  (process.env.MADOVA_SEED_DEMO ?? '').toLowerCase() === 'true'
+
 /**
- * Seed the demo account, but only into a genuinely empty installation.
+ * Seed the demo account — only when it has been asked for, and only into a
+ * genuinely empty installation.
  *
- * Without the emptiness check the demo fleet reappears on every restart, so
- * deleting it never sticks — the one thing an operator going live needs to do.
- * `MADOVA_SEED_DEMO=false` disables it outright.
+ * This is opt-in rather than opt-out on purpose. A deployment that forgets a
+ * flag should end up with an empty, honest site; it should never end up with a
+ * fake fleet and a one-tap demo login sitting on a real sign-in page. Getting
+ * that default the wrong way round put a demo autofill in front of real
+ * customers, which is not a mistake worth leaving available.
  */
 export function seed() {
-  if ((process.env.MADOVA_SEED_DEMO ?? '').toLowerCase() === 'false') return
+  if (!demoEnabled()) return
   if (findUserByEmail(DEMO_EMAIL)) return
   /* Real accounts exist — never inject demo data into a live install. */
   if (db().users.length > 0) return

@@ -112,7 +112,7 @@ function AuthShell({ mode }: { mode: Mode }) {
             </h1>
             <p className="mt-3 text-[0.88rem] leading-relaxed text-ink-400">
               {isLogin
-                ? 'Your fleet, your team and your API keys are where you left them.'
+                ? 'Your phones, your groups and your team are where you left them.'
                 : 'One cloud phone for 30 days with 30 minutes of runtime. No card, and nothing to install.'}
             </p>
 

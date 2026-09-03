@@ -7,7 +7,7 @@
  * That rule needs no configuration to bootstrap, which matters because the
  * point of this page is to configure a deployment that has no shell.
  */
-import { db, type User } from './store.js'
+import { db, mutate, type User } from './store.js'
 import { DEMO_EMAIL } from './seed.js'
 import { chainEnabled, merchantAddress, paymentWarnings, type ChainId } from './crypto.js'
 import { upstreamBase, upstreamConfigured, upstreamKey } from './fleet.js'
@@ -35,6 +35,41 @@ export function isAdmin(user: User | undefined): boolean {
   const admin = adminUser()
   return Boolean(admin && admin.id === user.id)
 }
+
+/* ---------------------------- demo data purge ---------------------------- */
+
+/**
+ * Remove the seeded demo account and everything it owns, from the browser.
+ *
+ * This exists because the operators most likely to be stuck with demo data are
+ * the ones on hosting with no usable shell — telling them to run a script is
+ * telling them to live with it.
+ */
+export function removeDemo(): { removed: boolean; phones: number } {
+  const demo = db().users.find((u) => u.email.toLowerCase() === DEMO_EMAIL)
+  if (!demo) return { removed: false, phones: 0 }
+
+  const phones = db().phones.filter((p) => p.owner_id === demo.id).length
+  mutate((d) => {
+    d.users = d.users.filter((u) => u.id !== demo.id)
+    d.phones = d.phones.filter((p) => p.owner_id !== demo.id)
+    d.orders = d.orders.filter((o) => o.user_id !== demo.id)
+    d.threads = d.threads.filter((t) => t.user_id !== demo.id)
+    d.groups = d.groups.filter((g) => g.owner_id !== demo.id)
+    d.proxies = d.proxies.filter((p) => p.owner_id !== demo.id)
+    d.api_keys = d.api_keys.filter((k) => k.owner_id !== demo.id)
+    d.files = d.files.filter((f) => f.owner_id !== demo.id)
+    d.numbers = d.numbers.filter((n) => n.owner_id !== demo.id)
+    d.tasks = d.tasks.filter((t) => t.owner_id !== demo.id)
+    d.members = d.members.filter((m) => m.owner_id !== demo.id)
+    d.sub_accounts = d.sub_accounts.filter((x) => x.owner_id !== demo.id)
+    d.usage = d.usage.filter((u) => u.owner_id !== demo.id)
+  })
+  return { removed: true, phones }
+}
+
+export const demoPresent = () =>
+  db().users.some((u) => u.email.toLowerCase() === DEMO_EMAIL)
 
 /* -------------------------------- health -------------------------------- */
 
@@ -114,6 +149,16 @@ export function health(): Check[] {
       state: 'warn',
       detail: 'Not set, so emailed links will be relative and may not open.',
     })
+
+  if (demoPresent()) {
+    checks.push({
+      id: 'demo',
+      label: 'Demo data',
+      state: 'error',
+      detail: 'The seeded demo account and its fake fleet are still in the database. '
+        + 'Remove it before you take real customers.',
+    })
+  }
 
   for (const warning of paymentWarnings()) {
     checks.push({ id: 'payment-warning', label: 'Payment configuration', state: 'error', detail: warning })
